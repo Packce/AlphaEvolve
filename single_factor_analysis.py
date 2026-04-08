@@ -1,4 +1,4 @@
-
+﻿
 # # 因子分析测试
 
 # ## 导入库
@@ -17,59 +17,28 @@ import inspect
 import re
 import os
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-import lightgbm as lgb
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from typing import List, Dict, Optional, Tuple, Union
-from torch.utils.data import DataLoader, TensorDataset
-from tqdm import tqdm
-
 
 nest_asyncio.apply()
 warnings.filterwarnings("ignore", category=RuntimeWarning)
-warnings.filterwarnings("ignore", category=FutureWarning, module="pandas")
-warnings.filterwarnings("ignore", message=".*Glyph.*")
-warnings.filterwarnings("ignore", message=".*does not have a glyph.*")
 import matplotlib.pyplot as plt
 
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'DejaVu Sans', 'FreeSans']
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
-plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['axes.formatter.useoffset'] = False
-plt.rcParams['axes.formatter.limits'] = (-3, 3)
 
+# 高级配色
 COLORS = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#3F88C5']
-COMBINED_COLORS = ['#2E86AB', '#2E86AB', '#2E86AB', '#2E86AB', '#2E86AB']
 
 # ## 需要调整的全局变量参数
 
-# 使用转换器的因子表达式（多因子列表）
-# formula = ["CORR(TS_ZSCORE(high, LV(high, 5)), EMV(85), open_interest)"]
-formula = [
-    "MIN(FORCAST(MIN(BOLL_UPPER(68, 8.56172617410534), open), 8), LOWRANGE(DPO(47, 36)))",
-    "CORR(TS_ZSCORE(high, LV(high, 5)), EMV(85), open_interest)",
-    "WR(2)",
-    "HHVBARS(LLV(SMA(close, TS_RANK(ROC(33), BRAR_AR(92)), 5.0), 0.003), TAN(CCI(112)))"
-]
+# 使用转换器的因子表达式
+# formula = "CORR(TS_ZSCORE(high, LV(high, 5)), EMV(85), open_interest)"
+formula = "RANK(WR(2), BOLL_UPPER(24, 2.26))"
 
 # 是否使用转换器，不使用时需修改手动计算因子中的因子表达式
 AUTO_ON = True
 
 # 是否保存因子到当前目录的因子库中
 SAVE_FACTOR = True
-
-# ========== 多因子合成模型开关 ==========
-# 是否使用 LightGBM 模型进行分析
-USE_LIGHTGBM = True
-
-# 是否使用 Elastic Net 模型进行分析
-USE_ELASTIC_NET = True
-
-# 是否使用 InstaSHAP 模型进行分析
-USE_INSTASHAP = True
 
 # ========== 板块与合约配置 ==========
 # SELECTED_SECTOR 可选：
@@ -113,7 +82,8 @@ MIN_CROSS_SECTION_COUNT = 2     # 单个时间截面最少有效合约数
 QUANTILES = 5
 PERIODS = (1, 3, 5)             # 对应 future_return / 分层收益等展示窗口
 TRADING_DAYS_PER_YEAR = 252
-
+USE_ALPHALENS = False           # 是否使用ALPHALENS，15分钟数据下默认关闭；日频时可开启
+# USE_ALPHALENS = True
 
 # ## 选择并获取品种
 # ========== 数据配置 ==========
@@ -179,6 +149,32 @@ FUTURES_SECTORS = {
         }
 }
 
+# ========== 板块选择配置 ==========
+# 选择要使用的板块，可以设置为：
+# - "all": 使用所有板块的所有合约
+# - "农产品": 使用农产品板块的所有合约
+# - "金属": 使用金属板块的所有合约
+# - "能源化工建材航运": 使用能源化工建材航运板块的所有合约
+# - "金融": 使用金融板块的所有合约
+# - ["农产品", "金属"]: 使用多个板块的所有合约
+# - ["农产品", "油脂油料类"]: 使用指定板块的指定子板块
+# - [["农产品", "油脂油料类"], ["金属", "贵金属"]]: 使用多个子板块
+# - [["农产品", "油脂油料类"], "金属"]: 混合选择（子板块和整个板块）
+# - ["时间分类", "日盘商品"]: 使用日盘商品的所有合约
+# - ["时间分类", "标准夜盘商品"]: 使用标准夜盘商品的所有合约
+# - ["时间分类", "有色金属"]: 使用有色金属的所有合约
+# - ["时间分类", "贵金属与原油"]: 使用贵金属与原油的所有合约
+# - ["时间分类", "股指期货"]: 使用股指期货的所有合约
+# - ["时间分类", "国债期货"]: 使用国债期货的所有合约
+# - 或者设置为 None，然后手动指定 SYMBOLS 列表
+
+# SELECTED_SECTOR = ["时间分类", "有色金属"]  # 设置为 None 表示手动指定合约，或设置为上述选项之一
+# SELECTED_SECTOR = None  # 设置为 None 表示手动指定合约，或设置为上述选项之一
+
+# ========== 手动指定合约列表（当 SELECTED_SECTOR 为 None 时使用）==========
+# 合约列表（支持多个合约），格式为 "合约代码888"
+# SYMBOLS = ["au888", "rb888","cu888","jd888","AP888"]  # 例如：["au888", "rb888", "cu888"]
+# SYMBOLS = ["au888","ag888"]  # 例如：["au888", "rb888", "cu888"]
 
 def get_symbols_by_sector(selected, sector_map, manual_symbols):
     if selected is None:
@@ -211,7 +207,7 @@ def get_symbols_by_sector(selected, sector_map, manual_symbols):
                     print(f"警告：未找到板块 '{sec}' 的子板块 '{cat}'，跳过")
                     all_valid = False
             else:
-                print(f"警告：无效的选择项 '{item}'，跳过")
+                print(f"警告：无效的选择项 '{item}'，跳过") 
                 all_valid = False
 
         if len(selected) == 2 and all(isinstance(x, str) for x in selected):
@@ -234,6 +230,35 @@ SYMBOLS = get_symbols_by_sector(SELECTED_SECTOR, FUTURES_SECTORS, MANUAL_SYMBOLS
 
 print(f"当前使用的合约列表（共 {len(SYMBOLS)} 个合约）：")
 print(SYMBOLS)
+
+
+# ## 旧的获取数据
+# import pandas as pd
+# import numpy as np
+
+# # 读取 CSV，前两行作为多级表头（feature, code），跳过第3行 "time"
+# df = pd.read_csv(r'c:\Users\Admin\AppData\Local\qmfquant\factor\train_X_dict_all.csv', header=[0, 1], skiprows=[2])
+# print(df)
+
+# # 第一列是时间索引
+# time_col = df.columns[0]
+# data_df = df.drop(columns=[time_col])  # 或保留时间用于索引
+
+# # 按 feature 分组列：保留全部 feature（open, close, high, low, volume, open_interest 等）
+# data_read_csv = {}
+# for key in data_df.columns.get_level_values(0).unique():
+#     if key == 'feature' or key == 'code':  # 首列已去掉，这里防呆
+#         continue
+#     cols = [c for c in data_df.columns if c[0] == key]
+#     if cols:
+#         arr = data_df[cols].values.astype(np.float64)
+#         data_read_csv[key] = arr
+
+# # data_read_csv 包含所有 feature，如 open, close, high, low, volume, open_interest
+# # 每个 value 为 array(T, N)，T=时间行数, N=品种数
+# print({k: v.shape for k, v in data_read_csv.items()})
+# print(data_read_csv)
+# print(data_read_csv["open"].shape)
 
 
 # ## 新的获取数据
@@ -585,639 +610,8 @@ X_TRAIN_SHAPE = X_dict["close"].shape
 X_TEST_SHAPE = X_dict_test["close"].shape
 X_NOW_SHAPE = X_dict_now["close"].shape
 
+
 # print(y)
-
-
-
-
-# ========= 定义InstaSHAP模型 =========
-class Subnet(nn.Module):
-    """单个特征子集 T 的贡献网络"""
-    def __init__(self, in_features: int, hidden_dims: List[int] = [64, 32], 
-                 output_dim: int = 1, activation: str = "relu"):
-        super().__init__()
-        layers = []
-        prev_dim = in_features
-        for h_dim in hidden_dims:
-            layers.append(nn.Linear(prev_dim, h_dim))
-            if activation == "relu":
-                layers.append(nn.ReLU())
-            elif activation == "tanh":
-                layers.append(nn.Tanh())
-            else:
-                layers.append(nn.ReLU())
-            prev_dim = h_dim
-        layers.append(nn.Linear(prev_dim, output_dim))
-        self.net = nn.Sequential(*layers)
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
-class InstaSHAPGAM(nn.Module):
-    """
-    InstaSHAP-GAM-k 模型：可解释的加性模型，支持特征交互
-    严格遵循论文 Equation 8 和 Equation 20 的实现
-    
-    Args:
-        n_features: 输入特征维度 d
-        k: 最大交互阶数（1 = 仅主效应，2 = 包含二阶交互）
-        feature_names: 特征名称列表（可选）
-        hidden_dims: 每个子网隐藏层维度
-        activation: 激活函数类型
-    """
-    def __init__(
-        self,
-        n_features: int,
-        k: int = 2,
-        feature_names: Optional[List[str]] = None,
-        hidden_dims: List[int] = [64, 32],
-        activation: str = "relu"
-    ):
-        super().__init__()
-        self.n_features = n_features
-        self.k = min(k, n_features)
-        self.feature_names = feature_names or [f"x{i}" for i in range(n_features)]
-        
-        # 生成所有 |T| <= k 的特征子集（仅前向传播时用于构造输出）
-        self.interaction_sets = self._generate_interaction_sets()
-        print(f"InstaSHAP-GAM-{k}: 共 {len(self.interaction_sets)} 个加性项")
-        
-        # 为每个子集 T 创建独立的子网络
-        self.subnets = nn.ModuleDict()
-        for i, T in enumerate(self.interaction_sets):
-            subnet_name = self._subset_to_key(T)
-            self.subnets[subnet_name] = Subnet(
-                in_features=len(T),
-                hidden_dims=hidden_dims,
-                output_dim=1,
-                activation=activation
-            )
-        
-        # 偏置项（常数项 f_0）
-        self.bias = nn.Parameter(torch.zeros(1))
-        
-    def _generate_interaction_sets(self) -> List[Tuple[int, ...]]:
-        """生成所有 |T| <= k 的特征子集"""
-        from itertools import combinations
-        sets = []
-        for order in range(1, self.k + 1):
-            for combo in combinations(range(self.n_features), order):
-                sets.append(combo)
-        # 空集（常数项）单独处理
-        return sets
-    
-    def _subset_to_key(self, subset: Tuple[int, ...]) -> str:
-        return "_".join(map(str, subset))
-    
-    def _key_to_subset(self, key: str) -> Tuple[int, ...]:
-        return tuple(map(int, key.split("_")))
-    
-    def forward(
-        self, 
-        x: torch.Tensor, 
-        mask: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        """
-        前向传播（支持掩码训练模式）
-        
-        Args:
-            x: 输入张量，shape (batch, d)
-            mask: 掩码张量，shape (batch, d)，1=特征被保留，0=特征被掩码
-                  若为 None，则正常前向传播
-        
-        Returns:
-            y_pred: 预测值，shape (batch, 1) 或 (batch,)
-        """
-        batch_size = x.shape[0]
-        output = self.bias.expand(batch_size)
-        
-        for T in self.interaction_sets:
-            # Instant Mask 检查：仅当 T 中所有特征都被保留时才启用
-            if mask is not None:
-                enabled = torch.all(mask[:, list(T)], dim=1)  # (batch,)
-                if not enabled.any():
-                    continue
-            else:
-                enabled = torch.ones(batch_size, dtype=torch.bool)
-            
-            # 提取特征子集 x_T
-            x_T = x[:, list(T)]  # (batch, |T|)
-            
-            # 计算贡献 phi_T(x_T)
-            subnet = self.subnets[self._subset_to_key(T)]
-            phi_T = subnet(x_T).squeeze(-1)  # (batch,)
-            
-            if mask is not None:
-                output = output + torch.where(enabled, phi_T, torch.zeros_like(phi_T))
-            else:
-                output = output + phi_T
-        
-        return output
-    
-    def get_shapley_values(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        计算每个样本的 Shapley 值（Equation 13 风格）
-        ϕ_i(x) = f_i(x_i) + Σ_{T⊇{i},|T|>1} f_T(x_T) / |T|
-        
-        Args:
-            x: 输入张量，shape (batch, d)
-        
-        Returns:
-            shapley: Shapley 值矩阵，shape (batch, d)
-        """
-        batch_size = x.shape[0]
-        shapley = torch.zeros(batch_size, self.n_features, device=x.device)
-        
-        for T in self.interaction_sets:
-            x_T = x[:, list(T)]
-            subnet = self.subnets[self._subset_to_key(T)]
-            phi_T = subnet(x_T).squeeze(-1)  # (batch,)
-            
-            # 将 f_T 均匀分配给 T 中的所有特征
-            contribution = phi_T.unsqueeze(-1) / len(T)  # (batch, 1)
-            
-            for idx, feat_idx in enumerate(T):
-                shapley[:, feat_idx] += contribution.squeeze()
-        
-        return shapley
-    
-    def get_shape_functions(self) -> Dict[str, callable]:
-        """获取所有形状函数（用于可视化）"""
-        shape_functions = {}
-        model_device = next(self.parameters()).device
-        
-        def make_function(subnet, feature_indices):
-            def func(x_T):
-                with torch.no_grad():
-                    x_tensor = torch.as_tensor(x_T, dtype=torch.float32, device=model_device)
-                    if x_tensor.dim() == 1:
-                        x_tensor = x_tensor.unsqueeze(0)
-                    return subnet(x_tensor).squeeze().cpu().numpy()
-            return func
-        
-        for T in self.interaction_sets:
-            key = self._subset_to_key(T)
-            shape_functions[f"f_{key}"] = make_function(self.subnets[key], T)
-        
-        return shape_functions
-
-class ShapleyMaskSampler:
-    """
-    SHAP 核分布掩码采样器
-    
-    严格按照 SHAP 核分布 p(S) ∝ C(d,s)^(-1) * 1/(s*(d-s))
-    实现掩码的批量采样
-    """
-    def __init__(self, n_features: int, device: torch.device = torch.device("cpu")):
-        self.n_features = n_features
-        self.device = device
-        self._precompute_weights()
-    
-    def _precompute_weights(self):
-        """预计算所有 2^d 种掩码的权重（实际可采样时动态计算）"""
-        from math import comb
-        weights = {}
-        from itertools import product
-        total_weight = 0
-        
-        for mask_tuple in product([0, 1], repeat=self.n_features):
-            s = sum(mask_tuple)
-            if s == 0 or s == self.n_features:
-                # 极端情况特殊处理（避免分母为零）
-                weight = 1e-6
-            else:
-                weight = 1.0 / (comb(self.n_features, s) * s * (self.n_features - s))
-            weights[mask_tuple] = weight
-            total_weight += weight
-        
-        # 归一化
-        for mask_tuple in weights:
-            weights[mask_tuple] /= total_weight
-        
-        self.masks = list(weights.keys())
-        self.probs = np.array([weights[m] for m in self.masks])
-    
-    def sample(self, batch_size: int) -> torch.Tensor:
-        """
-        采样 batch_size 个掩码
-        
-        Returns:
-            masks: shape (batch_size, n_features), dtype=torch.float32
-        """
-        indices = np.random.choice(len(self.masks), size=batch_size, p=self.probs)
-        masks = np.array([self.masks[i] for i in indices], dtype=np.float32)
-        return torch.tensor(masks, device=self.device)
-    
-    @staticmethod
-    def sample_fast(n_features: int, batch_size: int, device: torch.device) -> torch.Tensor:
-        """
-        高效近似采样（避免预计算 2^d 空间）
-        采样流程：1) 从 p(s) ∝ 1/(s*(d-s)) 采样子集大小；2) 均匀选择具体特征
-        """
-        s_probs = np.array([1.0 / (s * (n_features - s)) if 1 <= s <= n_features - 1 else 0 
-                            for s in range(n_features + 1)])
-        s_probs = s_probs / s_probs.sum()
-        
-        masks = []
-        for _ in range(batch_size):
-            s = np.random.choice(n_features + 1, p=s_probs)
-            if s == 0 or s == n_features:
-                # 全0或全1掩码，概率极低
-                mask = np.ones(n_features) if s == n_features else np.zeros(n_features)
-            else:
-                chosen = np.random.choice(n_features, size=s, replace=False)
-                mask = np.zeros(n_features)
-                mask[chosen] = 1
-            masks.append(mask)
-        
-        return torch.tensor(np.array(masks, dtype=np.float32), device=device)
-
-class InstaSHAPTrainer:
-    """
-    InstaSHAP 模型训练器
-    
-    严格遵循论文 Equation 20 的损失函数
-    """
-    def __init__(
-        self,
-        model: InstaSHAPGAM,
-        blackbox_model: Optional[callable] = None,
-        lr: float = 1e-3,
-        device: torch.device = torch.device("cpu"),
-        mask_sampler: Optional[ShapleyMaskSampler] = None
-    ):
-        self.model = model.to(device)
-        self.blackbox_model = blackbox_model
-        self.device = device
-        self.lr = lr
-        self.mask_sampler = mask_sampler or ShapleyMaskSampler(model.n_features, device)
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=10
-        )
-    
-    def _get_blackbox_prediction(
-        self, 
-        x: torch.Tensor, 
-        mask: torch.Tensor,
-        X_dict: Dict[str, np.ndarray],
-        feature_indices: Dict[str, int]
-    ) -> torch.Tensor:
-        """
-        获取 f(x;S)：仅保留掩码特征时的黑盒模型输出
-        论文 Section 2.1 定义的移除方法
-        
-        这里需要根据你的数据格式实现具体的条件期望计算
-        """
-        batch_size = x.shape[0]
-        predictions = torch.zeros(batch_size, device=self.device)
-        
-        if self.blackbox_model is None:
-            raise ValueError("需要提供 blackbox_model 或自定义预测逻辑")
-        
-        # 简化实现：假设 blackbox_model 接收 (x, mask) 作为输入
-        # 实际应用中应使用条件期望 M_p 来计算
-        with torch.no_grad():
-            predictions = self.blackbox_model(x, mask)
-        
-        return predictions
-    
-    def compute_instashap_loss(
-        self,
-        x: torch.Tensor,
-        masks: torch.Tensor,
-        f_masked: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
-        """
-        计算 InstaSHAP 损失
-        
-        L = E_x[ E_{S~p(S)}[ (f(x;S) - Σ_T 1(T⊆S) φ_T(x_T))^2 ] ]
-        """
-        batch_size = x.shape[0]
-        total_loss = 0.0
-        
-        for i in range(batch_size):
-            x_i = x[i:i+1]          # (1, d)
-            mask_i = masks[i]       # (d,)
-            
-            # 1. 计算黑盒输出 f(x;S)
-            if f_masked is not None:
-                f_val = f_masked[i]
-            elif self.blackbox_model is not None:
-                f_val = self._get_blackbox_prediction(x_i, mask_i, None, None)
-            else:
-                raise ValueError("必须提供 f_masked 或 blackbox_model")
-            
-            # 2. 计算 GAM 预测（带掩码）
-            y_pred = self.model(x_i, mask=mask_i.unsqueeze(0))  # (1,)
-            
-            # 3. MSE 损失
-            loss = F.mse_loss(y_pred, f_val.reshape_as(y_pred))
-            total_loss += loss
-        
-        return total_loss / batch_size
-    
-    def train_step(
-        self,
-        x_batch: torch.Tensor,
-        f_masked_batch: Optional[torch.Tensor] = None,
-        return_loss: bool = True
-    ) -> float:
-        """
-        单步训练
-        """
-        batch_size = x_batch.shape[0]
-        
-        # 采样掩码（SHAP 核分布）
-        masks = self.mask_sampler.sample_fast(self.model.n_features, batch_size, self.device)
-        
-        self.optimizer.zero_grad()
-        
-        if f_masked_batch is not None:
-            loss = self.compute_instashap_loss(x_batch, masks, f_masked_batch)
-        else:
-            loss = self.compute_instashap_loss(x_batch, masks)
-        
-        loss.backward()
-        self.optimizer.step()
-        
-        return loss.item() if return_loss else 0.0
-    
-    def train(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: Optional[np.ndarray] = None,
-        y_val: Optional[np.ndarray] = None,
-        epochs: int = 100,
-        batch_size: int = 32,
-        val_freq: int = 10,
-        early_stopping_patience: int = 20,
-        verbose: bool = True
-    ) -> Dict[str, List[float]]:
-        """
-        完整的训练循环
-        
-        注意：论文中提到 InstaSHAP 的优势在于训练完成后，
-        可在单次前向传播中计算 SHAP 值（get_shapley_values 方法）
-        """
-        dataset = TensorDataset(
-            torch.tensor(X_train, dtype=torch.float32, device=self.device),
-            torch.tensor(y_train, dtype=torch.float32, device=self.device)
-        )
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-        
-        history = {'train_loss': [], 'val_loss': [], 'val_ic': []}
-        best_val_loss = float('inf')
-        patience_counter = 0
-        
-        for epoch in range(epochs):
-            self.model.train()
-            epoch_losses = []
-            
-            for x_batch, y_batch in tqdm(dataloader, desc=f"Epoch {epoch+1}", disable=not verbose):
-                loss = self.train_step(x_batch, f_masked_batch=y_batch)
-                epoch_losses.append(loss)
-            
-            avg_train_loss = np.mean(epoch_losses)
-            history['train_loss'].append(avg_train_loss)
-            
-            if X_val is not None and y_val is not None and (epoch + 1) % val_freq == 0:
-                val_loss, val_ic = self.validate(X_val, y_val)
-                history['val_loss'].append(val_loss)
-                history['val_ic'].append(val_ic)
-                self.scheduler.step(val_loss)
-                
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    patience_counter = 0
-                else:
-                    patience_counter += 1
-                
-                if patience_counter >= early_stopping_patience:
-                    if verbose:
-                        print(f"Early stopping at epoch {epoch+1}")
-                    break
-                
-                if verbose:
-                    print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.6f}, val_loss={val_loss:.6f}, val_ic={val_ic:.6f}")
-            elif verbose:
-                print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.6f}")
-        
-        return history
-    
-    def validate(self, X_val: np.ndarray, y_val: np.ndarray) -> Tuple[float, float]:
-        """验证并计算损失和 IC"""
-        self.model.eval()
-        with torch.no_grad():
-            x_tensor = torch.tensor(X_val, dtype=torch.float32, device=self.device)
-            y_tensor = torch.tensor(y_val, dtype=torch.float32, device=self.device)
-            
-            # 正常前向传播（无掩码）
-            y_pred = self.model(x_tensor).squeeze()
-            val_loss = F.mse_loss(y_pred, y_tensor).item()
-            
-            # 计算 IC
-            pred_np = y_pred.cpu().numpy()
-            y_np = y_val.flatten()
-            mask = ~(np.isnan(pred_np) | np.isnan(y_np))
-            if mask.sum() > 2:
-                from scipy.stats import rankdata
-                ic = np.corrcoef(rankdata(pred_np[mask]), rankdata(y_np[mask]))[0, 1]
-            else:
-                ic = 0.0
-            
-        return val_loss, ic
-    
-    def explain(self, X: np.ndarray) -> np.ndarray:
-        """
-        单次前向传播计算 SHAP 值（论文核心优势）
-        """
-        self.model.eval()
-        with torch.no_grad():
-            x_tensor = torch.tensor(X, dtype=torch.float32, device=self.device)
-            shapley_values = self.model.get_shapley_values(x_tensor)
-        return shapley_values.cpu().numpy()
-
-
-def show_img(fig, filename='plot.png'):
-    import os
-    output_dir = '多因子分析可视化'
-    os.makedirs(output_dir, exist_ok=True)
-    filepath = os.path.join(output_dir, filename)
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
-    fig.savefig(filepath, dpi=150, bbox_inches='tight')
-    plt.close(fig)
-
-
-def _get_color_cycle(n, base_colors=None):
-    if base_colors is None:
-        base_colors = COLORS
-    if n <= len(base_colors):
-        return [base_colors[i] for i in range(n)]
-    cmap = plt.get_cmap('tab20')
-    return [cmap(i / max(1, n - 1)) for i in range(n)]
-
-
-def plot_ic_ir_multi(ic_dict, ir_dict):
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 9))
-    fig.suptitle("多因子 IC / IR 对比", fontsize=16)
-
-    colors = _get_color_cycle(len(ic_dict))
-    for i, (name, ic) in enumerate(ic_dict.items()):
-        ax1.plot(ic.index, ic.values, color=colors[i], label=name, linewidth=1.8)
-    ax1.axhline(0, c='k', ls='--')
-    ax1.set_title('IC 序列')
-    ax1.legend(loc='best', fontsize='small')
-
-    for i, (name, ic) in enumerate(ic_dict.items()):
-        ax2.plot(ic.index, ic.rolling(20, min_periods=1).mean(), color=colors[i], linewidth=1.8)
-    ax2.axhline(0, c='k', ls='--')
-    ax2.set_title('滚动 IC')
-    ax2.legend(list(ic_dict.keys()), loc='best', fontsize='small')
-
-    all_ic = [ic.dropna().values for ic in ic_dict.values() if len(ic.dropna()) > 0]
-    if len(all_ic) > 0:
-        hist_colors = _get_color_cycle(len(all_ic))
-        ax3.hist(all_ic, bins=20, color=hist_colors, label=list(ic_dict.keys()), alpha=0.45, edgecolor='black')
-    ax3.set_title('IC 分布')
-    ax3.legend(loc='best', fontsize='small')
-
-    names, vals = list(ir_dict.keys()), list(ir_dict.values())
-    bar_colors = _get_color_cycle(len(names))
-    ax4.bar(names, vals, color=bar_colors)
-    ax4.axhline(0.2, c='orange', ls='--')
-    ax4.axhline(0.5, c='red', ls='--')
-    ax4.set_title('IR')
-    ax4.set_ylabel('IR')
-    ax4.set_xticklabels(names, rotation=45, ha='right')
-
-    show_img(fig, '多因子_IC_IR分析.png')
-
-
-def plot_multi_quantile(quantile_return_dict):
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 9))
-    fig.suptitle("多因子分层收益", fontsize=16)
-
-    x = np.arange(1, QUANTILES + 1)
-    w = 0.15
-    colors = _get_color_cycle(len(quantile_return_dict))
-    for i, (name, q) in enumerate(quantile_return_dict.items()):
-        mean_values = q.mean(axis=0).reindex(range(1, QUANTILES + 1), fill_value=np.nan)
-        ax1.bar(x + i * w, mean_values, w, color=colors[i], label=name, alpha=0.9)
-    ax1.axhline(0, c='k', ls='--')
-    ax1.set_title('分层平均收益')
-    ax1.set_xlabel('分层')
-    ax1.set_ylabel('平均收益')
-    ax1.legend(loc='best', fontsize='small')
-
-    for i, (name, q) in enumerate(quantile_return_dict.items()):
-        if 1 in q.columns and QUANTILES in q.columns:
-            diff = q[QUANTILES] - q[1]
-            ax2.plot(diff.cumsum(), color=colors[i], label=name, linewidth=1.8)
-        else:
-            ax2.plot(np.zeros(len(q)), color=colors[i], label=name, linewidth=1.8)
-    ax2.set_title('高低分层收益差累积')
-    ax2.set_xlabel('时间点')
-    ax2.set_ylabel('累积收益差')
-    ax2.legend(loc='best', fontsize='small')
-    show_img(fig, '多因子_分位数收益.png')
-
-
-def plot_corr(factor_df):
-    import seaborn as sns
-
-    corr = factor_df.corr()
-    fig = plt.figure(figsize=(9, 7))
-    sns.heatmap(corr, annot=True, cmap="coolwarm", vmin=-1, vmax=1)
-    plt.title("因子相关性")
-    show_img(fig, '因子相关性.png')
-
-
-def plot_combined(combined_qret):
-    fig = plt.figure(figsize=(9, 5))
-    plt.bar(range(1, QUANTILES + 1), combined_qret.mean(), color=COMBINED_COLORS[:QUANTILES])
-    plt.axhline(0, c='k', ls='--')
-    plt.title("合成因子分层平均收益")
-    plt.xlabel('分层')
-    plt.ylabel('平均收益')
-    show_img(fig, '合成因子_分层平均收益.png')
-
-
-def cross_sectional_quantile_returns(factor_mat, y_mat, quantiles=5):
-    T, N = factor_mat.shape
-    qret = pd.DataFrame(np.nan, index=range(T), columns=range(1, quantiles + 1), dtype=float)
-
-    for t in range(T):
-        f = factor_mat[t]
-        y = y_mat[t]
-        valid = np.isfinite(f) & np.isfinite(y)
-        if np.sum(valid) < quantiles:
-            continue
-        try:
-            labels = pd.qcut(pd.Series(f[valid]), q=quantiles, labels=False, duplicates='drop') + 1
-        except Exception:
-            continue
-        for q in range(1, quantiles + 1):
-            mask = labels == q
-            if mask.sum() > 0:
-                qret.iat[t, q - 1] = np.nanmean(y[valid][mask])
-    qret.columns = range(1, quantiles + 1)
-    return qret
-
-
-def row_rankdata(mat):
-    ranked = np.full(mat.shape, np.nan)
-    for t in range(mat.shape[0]):
-        row = mat[t]
-        mask = np.isfinite(row)
-        if np.sum(mask) > 0:
-            ranked[t, mask] = _rankdata(row[mask], method="average")
-    return ranked
-
-
-def build_real_data_visualizations():
-    try:
-        factor_now
-    except NameError:
-        print("未找到因子数据，跳过可视化")
-        return
-
-    if not isinstance(factor_now, list) or len(factor_now) == 0:
-        print("因子数据为空，跳过可视化")
-        return
-
-    factor_matrices = {f"因子{i+1}": factor_now[i] for i in range(len(factor_now))}
-    if len(factor_matrices) == 0:
-        print("真实数据中未找到可用因子矩阵，跳过可视化")
-        return
-
-    ic_dict = {}
-    ir_dict = {}
-    quantile_return_dict = {}
-
-    for name, mat in factor_matrices.items():
-        stats = calc_ic_stats(mat, y_now)
-        ic_dict[name] = pd.Series(stats["ic_series"]).reset_index(drop=True)
-        ir_dict[name] = float(stats["icir"]) if np.isfinite(stats["icir"]) else 0.0
-        quantile_return_dict[name] = cross_sectional_quantile_returns(mat, y_now, quantiles=QUANTILES)
-
-    plot_ic_ir_multi(ic_dict, ir_dict)
-    plot_multi_quantile(quantile_return_dict)
-
-    factor_ts = {
-        name: np.nanmean(mat, axis=1)
-        for name, mat in factor_matrices.items()
-    }
-    index = pivoted_now[features[0]].index if features and features[0] in pivoted_now else None
-    if index is not None:
-        plot_corr(pd.DataFrame(factor_ts, index=index))
-
-    rank_matrices = [row_rankdata(mat) for mat in factor_matrices.values()]
-    combined_mat = np.nanmean(np.stack(rank_matrices, axis=-1), axis=-1)
-    combined_qret = cross_sectional_quantile_returns(combined_mat, y_now, quantiles=QUANTILES)
-    plot_combined(combined_qret)
 
 
 # ## 因子计算逻辑函数
@@ -3537,31 +2931,21 @@ def convert_formula(formula: str, my_cls: Any, x_dict_name: str = "X_dict", my_n
     return FormulaConverter(my_cls=my_cls, my_name=my_name, x_dict_name=x_dict_name).convert(formula)
 
 
-def build_factor_expressions(formula, my_cls: Any, my_name: str = "My"):
-    if isinstance(formula, list):
-        factor_exprs = [FormulaConverter(my_cls=my_cls, my_name=my_name, x_dict_name="X_dict").convert(f) for f in formula]
-        factor_now_exprs = [FormulaConverter(my_cls=my_cls, my_name=my_name, x_dict_name="X_dict_now").convert(f) for f in formula]
-        factor_test_exprs = [FormulaConverter(my_cls=my_cls, my_name=my_name, x_dict_name="X_dict_test").convert(f) for f in formula]
-        return {
-            "factor": factor_exprs,
-            "factor_now": factor_now_exprs,
-            "factor_test": factor_test_exprs,
-        }
-    else:
-        return {
-            "factor": FormulaConverter(my_cls=my_cls, my_name=my_name, x_dict_name="X_dict").convert(formula),
-            "factor_now": FormulaConverter(my_cls=my_cls, my_name=my_name, x_dict_name="X_dict_now").convert(formula),
-            "factor_test": FormulaConverter(my_cls=my_cls, my_name=my_name, x_dict_name="X_dict_test").convert(formula),
-        }
+def build_factor_expressions(formula: str, my_cls: Any, my_name: str = "My") -> Dict[str, str]:
+    return {
+        "factor": convert_formula(formula, my_cls=my_cls, x_dict_name="X_dict", my_name=my_name),
+        "factor_now": convert_formula(formula, my_cls=my_cls, x_dict_name="X_dict_now", my_name=my_name),
+        "factor_test": convert_formula(formula, my_cls=my_cls, x_dict_name="X_dict_test", my_name=my_name),
+    }
 
 
 def eval_factors(
-    formula,
+    formula: str,
     my_cls: Any,
     X_dict: Dict[str, np.ndarray],
     X_dict_now: Dict[str, np.ndarray],
     X_dict_test: Dict[str, np.ndarray],
-):
+) -> Dict[str, np.ndarray]:
     exprs = build_factor_expressions(formula=formula, my_cls=my_cls, my_name="My")
     env = {
         "np": np,
@@ -3570,22 +2954,14 @@ def eval_factors(
         "X_dict_now": X_dict_now,
         "X_dict_test": X_dict_test,
     }
-    if isinstance(formula, list):
-        return {name: [eval(expr, env, {}) for expr in expr_list] for name, expr_list in exprs.items()}
-    else:
-        return {name: eval(expr, env, {}) for name, expr in exprs.items()}# #### 使用转换器计算因子
+    return {name: eval(expr, env, {}) for name, expr in exprs.items()}# #### 使用转换器计算因子
 # formula = "CORR(TS_ZSCORE(high, LV(high, 5)), EMV(85), open_interest)"
 # formula = "ADD(WR(1.0), SIN(MUL(LLV(HV(MIN(EMV(22), RANK(BIAS(23), EMV(5.048163479178479))), 11), KDJ_J(4, 63, 11)), SLOPE(RSI(36), 88.67576321773176))))"
 # formula = "RANK(WR(3), FORCAST(EMA(MA(BRAR_BR(39.67400187583232), PSY(61)), SCALE(RANK(BOLL_LOWER(51.92058608481411, 105.33912028012675), CCI(89)), MUL(TS_ZSCORE(TOPRANGE(TS_RANK(TR(), ATR(95))), MAX(CR(18), KDJ_J(10, 74, 79))), RANK(DIFMA(101, 105.70288284157309, 54), DIFMA(67, 119.59247708006433, 110))))), RANK(TS_ZSCORE(SCALE(RANK_SUB(MACD_MACD(103.1367287638528, 49, 71), TS_ZSCORE(ATR(74), DPO(5, 63)), TS_ZSCORE(LLV(CR(73.59636181482315), 60.49431526716149), SIGNEDPOWER(KDJ_D(95.0270735386948, 111.14688602129436, 106.9185473465797)))), SCALE(MAX(ASI(41.10188909712552), TS_ZSCORE(MACD_DIF(90, 11), MFI(27))), RANK_SUB(BBI(100.80402744834933, 17, 12.732093098580961, 29), BIAS(54), KDJ_D(49, 80.24928039078695, 90.62123976587635)))), SCALE(SMA(SIN(SAR(63, 46.70113766183343, 62.152669951821125)), 4, 5.0), SCALE(VR(15), ADX(40.069828069434735, 90.18823201047609)))), INV(RANK(SCALE(RANK(CORR(KDJ_J(89, 57.906667999650715, 41.60920604942375), RSI(22.009126046643384), MACD_DEA(69, 4, 65)), ABS(CR(90.02718123376458))), EMV(65)), CCI(78.69447786554845))))))"
 # formula = "CORR(CORR(SIN(TOPRANGE(PSY(75))), TAN(MASS(188.91227410655506, 50)), ROC(5.943201414914385)), ATR(64.67582157232408), BIAS(15.493019300191346))"
 # 1) 先看转换结果字符串
 exprs = build_factor_expressions(formula, My)
-if isinstance(formula, list):
-    print(f"共 {len(formula)} 个因子")
-    # for i, expr in enumerate(exprs["factor"]):
-        # print(f"因子{i+1}: {expr}") # 已注释
-else:
-    print(exprs["factor"])
+# print(exprs["factor"])
 # print(exprs["factor_now"])
 # print(exprs["factor_test"])
 
@@ -3594,6 +2970,7 @@ factors = eval_factors(formula, My, X_dict, X_dict_now, X_dict_test)
 factor = factors["factor"]
 factor_now = factors["factor_now"]
 factor_test = factors["factor_test"]
+
 
 # ### 手动计算因子
 # CLOSE = X_dict["close"]
@@ -3642,67 +3019,6 @@ if not AUTO_ON:
     factor = My.WR(X_dict["close"],X_dict["high"],X_dict["low"],2)
     factor_now = My.WR(X_dict_now["close"],X_dict_now["high"],X_dict_now["low"],2)
     factor_test = My.WR(X_dict_test["close"],X_dict_test["high"],X_dict_test["low"],2)# ## 测试计算IC、IR值
-
-def panel_to_long_factor_df(factor_arr, y_arr, pivot_dict, split_name):
-    factor_df = pd.DataFrame(
-        np.asarray(factor_arr, dtype=np.float64),
-        index=pivot_dict['close'].index,
-        columns=pivot_dict['close'].columns,
-    )
-    ret_df = pd.DataFrame(
-        np.asarray(y_arr, dtype=np.float64),
-        index=pivot_dict['future_return'].index,
-        columns=pivot_dict['future_return'].columns,
-    )
-
-    factor_long = factor_df.stack(future_stack=True).rename('factor')
-    ret_long = ret_df.stack(future_stack=True).rename('future_return')
-    out = pd.concat([factor_long, ret_long], axis=1).reset_index()
-    out.columns = ['time', 'code', 'factor', 'future_return']
-    out['split'] = split_name
-    out = out.sort_values(['time', 'code']).reset_index(drop=True)
-    return out
-
-
-def build_quantile_report(long_df, quantiles=5):
-    dfq = long_df.copy()
-    dfq = dfq[np.isfinite(dfq['factor']) & np.isfinite(dfq['future_return'])].copy()
-    if dfq.empty:
-        return pd.DataFrame(), pd.Series(dtype=float)
-
-    def _quantile_by_time(s):
-        if s.notna().sum() < quantiles:
-            return pd.Series(np.nan, index=s.index)
-        try:
-            return pd.qcut(s.rank(method='first'), quantiles, labels=False) + 1
-        except Exception:
-            return pd.Series(np.nan, index=s.index)
-
-    dfq['quantile'] = dfq.groupby('time')['factor'].transform(_quantile_by_time)
-    dfq = dfq.dropna(subset=['quantile']).copy()
-    if dfq.empty:
-        return pd.DataFrame(), pd.Series(dtype=float)
-
-    dfq['quantile'] = dfq['quantile'].astype(int)
-    quantile_ret = dfq.groupby(['time', 'quantile'])['future_return'].mean().unstack()
-    long_short = quantile_ret[quantile_ret.columns.max()] - quantile_ret[quantile_ret.columns.min()]
-    return quantile_ret, long_short
-
-
-def ic_curve_from_long(long_df):
-    rows = []
-    for t, grp in long_df.groupby('time'):
-        grp = grp[np.isfinite(grp['factor']) & np.isfinite(grp['future_return'])]
-        if len(grp) < int(globals().get("MIN_CROSS_SECTION_COUNT", 2)):
-            continue
-        rows.append((t, grp['factor'].rank().corr(grp['future_return'].rank())))
-    if not rows:
-        return pd.Series(dtype=float)
-    s = pd.Series(dict(rows)).sort_index()
-    s.name = 'rank_ic'
-    return s
-
-
 def calc_ic_stats(factor, y):
     """计算单个样本区间的 rankIC / ICIR 统计量"""
     pred = np.asarray(factor, dtype=np.float64)
@@ -3808,215 +3124,280 @@ def fitness_func(factor, y, factor_test=None, y_test=None, return_details=False)
     return final_fitness
 
 
-def analyze_single_factor(factor_val, factor_now_val, factor_test_val, y, y_now, y_test, formula_expr, pivoted, pivoted_now, pivoted_test):
-    temp1 = fitness_func(factor_val, y, factor_test=factor_test_val, y_test=y_test, return_details=True)
-    temp_train = calc_ic_stats(factor_val, y)
-    temp_test = calc_ic_stats(factor_test_val, y_test)
-    temp_now = calc_ic_stats(factor_now_val, y_now)
+temp1 = fitness_func(factor, y, factor_test=factor_test, y_test=y_test, return_details=True)
+temp_train = calc_ic_stats(factor, y)
+temp_test = calc_ic_stats(factor_test, y_test)
+temp_now = calc_ic_stats(factor_now, y_now)
 
-    print(f"\n因子表达式: {formula_expr}")
-    print(f"品种合约: {SYMBOLS}")
-    print(f"预测周期: {Y_PERIOD}")
-    summary_df = pd.DataFrame([
-        [temp_train['mean_ic'], temp_train['icir'], temp_train['valid_ts']],
-        [temp_test['mean_ic'], temp_test['icir'], temp_test['valid_ts']],
-        [temp_now['mean_ic'], temp_now['icir'], temp_now['valid_ts']],
-    ], columns=['IC', 'IR', '有效时间点'], index=[
-        f'训练集({BEGIN_TIME}~{END_TIME})',
-        f'测试集({BEGIN_TIME_TEST}~{END_TIME_TEST})',
-        f'真实集({BEGIN_TIME_NOW}~{END_TIME_NOW})',
-    ])
-    print(summary_df)
+print(f"因子表达式: {formula}")
+print(f"品种合约: {SYMBOLS}")
+print(f"预测周期: {Y_PERIOD}")
+summary_df = pd.DataFrame([
+    [temp_train['mean_ic'], temp_train['icir'], temp_train['valid_ts']],
+    [temp_test['mean_ic'], temp_test['icir'], temp_test['valid_ts']],
+    [temp_now['mean_ic'], temp_now['icir'], temp_now['valid_ts']],
+], columns=['IC', 'IR', '有效时间点'], index=[
+    f'训练集({BEGIN_TIME}~{END_TIME})',
+    f'测试集({BEGIN_TIME_TEST}~{END_TIME_TEST})',
+    f'真实集({BEGIN_TIME_NOW}~{END_TIME_NOW})',
+])
+print(summary_df)
 
-    print(f"综合适应度（训练/测试）: {temp1['fitness']:.6f}")
-
-    return {
-        "formula": formula_expr,
-        "temp_train": temp_train,
-        "temp_test": temp_test,
-        "temp_now": temp_now,
-        "temp1": temp1,
-    }
-
-
-if isinstance(formula, list):
-    all_results = []
-    all_analysis = []
-    for i, (f_expr, f_val, f_now_val, f_test_val) in enumerate(zip(formula, factor, factor_now, factor_test)):
-        print(f"\n{'='*50}")
-        print(f"计算第 {i+1}/{len(formula)} 个因子")
-        print(f"{'='*50}")
-        result = analyze_single_factor(f_val, f_now_val, f_test_val, y, y_now, y_test, f_expr, pivoted, pivoted_now, pivoted_test)
-        all_results.append(result)
-
-        analysis_train = panel_to_long_factor_df(f_val, y, pivoted, 'train')
-        analysis_test = panel_to_long_factor_df(f_test_val, y_test, pivoted_test, 'test')
-        analysis_now = panel_to_long_factor_df(f_now_val, y_now, pivoted_now, 'now')
-        
-        all_analysis.append({
-            'factor_index': i + 1,
-            'formula': f_expr,
-            'train': analysis_train,
-            'test': analysis_test,
-            'now': analysis_now
-        })
-
-        for split_name, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
-            ic_s = ic_curve_from_long(long_df)
-            qret, ls = build_quantile_report(long_df, quantiles=QUANTILES)
-
-            print(f"\n===== {split_name} =====")
-            print(f"样本数: {len(long_df)}")
-            print(f"有效IC时间点: {ic_s.shape[0]}")
-            if not ic_s.empty:
-                print(f"平均IC: {ic_s.mean():.6f}, ICIR: {ic_s.mean() / (ic_s.std() + 1e-8):.6f}")
-            if not qret.empty:
-                print(qret.mean().to_frame('各分位平均未来收益').T)
-                print(ls.describe().to_frame('多空组合统计'))
-
-    print(f"\n{'='*50}")
-    print("多因子汇总")
-    print(f"{'='*50}")
-    for i, result in enumerate(all_results):
-        print(f"\n因子{i+1}: {result['formula']}")
-        print(f"  训练集 IC: {result['temp_train']['mean_ic']:.6f}, IR: {result['temp_train']['icir']:.6f}")
-        print(f"  测试集 IC: {result['temp_test']['mean_ic']:.6f}, IR: {result['temp_test']['icir']:.6f}")
-        print(f"  真实集 IC: {result['temp_now']['mean_ic']:.6f}, IR: {result['temp_now']['icir']:.6f}")
-else:
-    result = analyze_single_factor(factor, factor_now, factor_test, y, y_now, y_test, formula, pivoted, pivoted_now, pivoted_test)
-
-    analysis_train = panel_to_long_factor_df(factor, y, pivoted, 'train')
-    analysis_test = panel_to_long_factor_df(factor_test, y_test, pivoted_test, 'test')
-    analysis_now = panel_to_long_factor_df(factor_now, y_now, pivoted_now, 'now')
-
-    for split_name, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
-        ic_s = ic_curve_from_long(long_df)
-        qret, ls = build_quantile_report(long_df, quantiles=QUANTILES)
-
-        print(f"\n===== {split_name} =====")
-        print(f"样本数: {len(long_df)}")
-        print(f"有效IC时间点: {ic_s.shape[0]}")
-        if not ic_s.empty:
-            print(f"平均IC: {ic_s.mean():.6f}, ICIR: {ic_s.mean() / (ic_s.std() + 1e-8):.6f}")
-        if not qret.empty:
-            print(qret.mean().to_frame('各分位平均未来收益').T)
-            print(ls.describe().to_frame('多空组合统计'))
+print(f"综合适应度（训练/测试）: {temp1['fitness']:.6f}")
 
 
 # ## 因子加入本地库
 
 if SAVE_FACTOR:
-    output_csv = "多因子分析库.csv"
+    # 将当前因子结果追加到当前目录下的csv文件中（如不存在则新建）
+    output_csv = "因子库.csv"
+    row = {
+        "入库时间": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "因子表达式": formula,
+        "品种选择": SELECTED_SECTOR,
+        "品种合约": str(SYMBOLS),
+        "数据周期": SYMBOL_CYCLE,
+        "预测周期": Y_PERIOD,
+        "训练集时间": f"{BEGIN_TIME}~{END_TIME}",
+        "训练集IC": temp_train['mean_ic'],
+        "训练集IR": temp_train['icir'],
+        "训练集有效时间点": temp_train['valid_ts'],
+        "测试集时间": f"{BEGIN_TIME_TEST}~{END_TIME_TEST}",
+        "测试集IC": temp_test['mean_ic'],
+        "测试集IR": temp_test['icir'],
+        "测试集有效时间点": temp_test['valid_ts'],
+        "真实集时间": f"{BEGIN_TIME_NOW}~{END_TIME_NOW}",
+        "真实集IC": temp_now['mean_ic'],
+        "真实集IR": temp_now['icir'],
+        "真实集有效时间点": temp_now['valid_ts'],
+        "按IC分类": "IC有效因子" if temp_now['mean_ic'] >= 0.05 else "IC无效因子",
+        "按IR分类": "IR稳定因子" if temp_now['icir'] >= 0.3 else "IR不稳定因子"
+    }
 
-    if isinstance(formula, list):
-        rows_to_save = []
-        for i, result in enumerate(all_results):
-            row = {
-                "入库时间": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "因子表达式": result["formula"],
-                "品种选择": SELECTED_SECTOR,
-                "品种合约": str(SYMBOLS),
-                "预测周期": Y_PERIOD,
-                "训练集时间": f"{BEGIN_TIME}~{END_TIME}",
-                "训练集IC": result["temp_train"]['mean_ic'],
-                "训练集IR": result["temp_train"]['icir'],
-                "训练集有效时间点": result["temp_train"]['valid_ts'],
-                "测试集时间": f"{BEGIN_TIME_TEST}~{END_TIME_TEST}",
-                "测试集IC": result["temp_test"]['mean_ic'],
-                "测试集IR": result["temp_test"]['icir'],
-                "测试集有效时间点": result["temp_test"]['valid_ts'],
-                "真实集时间": f"{BEGIN_TIME_NOW}~{END_TIME_NOW}",
-                "真实集IC": result["temp_now"]['mean_ic'],
-                "真实集IR": result["temp_now"]['icir'],
-                "真实集有效时间点": result["temp_now"]['valid_ts'],
-                "按IC分类": "IC有效因子" if result["temp_now"]['mean_ic'] >= 0.05 else "IC无效因子",
-                "按IR分类": "IR稳定因子" if result["temp_now"]['icir'] >= 0.3 else "IR不稳定因子"
-            }
-            rows_to_save.append(row)
+    # 判断重复只考虑：因子表达式、品种合约、预测周期、训练集时间、测试集时间、真实集时间
+    duplicate_cols = [
+        "因子表达式",
+        "品种合约",
+        "预测周期",
+        "训练集时间",
+        "测试集时间",
+        "真实集时间"
+    ]
 
-        duplicate_cols = [
-            "因子表达式",
-            "品种合约",
-            "预测周期",
-            "训练集时间",
-            "测试集时间",
-            "真实集时间"
-        ]
-
-        if os.path.exists(output_csv):
-            try:
-                df_base = pd.read_csv(output_csv, dtype=str)
-            except Exception:
-                df_base = pd.DataFrame()
-            if not df_base.empty:
-                for row in rows_to_save:
-                    row_df = pd.DataFrame([{col: str(row[col]) for col in duplicate_cols}])
-                    df_cmp = df_base[duplicate_cols].astype(str)
-                    matches = (df_cmp == row_df.iloc[0]).all(axis=1)
-                    if not matches.any():
-                        df_base = pd.concat([df_base, pd.DataFrame([row])], ignore_index=True)
-                df_base.to_csv(output_csv, index=False, encoding="utf-8-sig")
-                print(f"本次 {len(rows_to_save)} 个因子结果已追加到 {output_csv}")
-            else:
-                df_base = pd.DataFrame(rows_to_save)
-                df_base.to_csv(output_csv, index=False, encoding="utf-8-sig")
-                print(f"本次 {len(rows_to_save)} 个因子结果已保存到 {output_csv}")
+    if os.path.exists(output_csv):
+        try:
+            df_base = pd.read_csv(output_csv, dtype=str)  # 以字符串形式读，避免类型误差
+        except Exception:
+            df_base = pd.DataFrame()
+        is_duplicate = False
+        if not df_base.empty:
+            # 将当前row转为DataFrame，类型全部转str
+            row_df = pd.DataFrame([{col: str(row[col]) for col in duplicate_cols}])
+            df_cmp = df_base[duplicate_cols].astype(str)
+            # 比较仅这几个字段是否完全一致
+            matches = (df_cmp == row_df.iloc[0]).all(axis=1)
+            if matches.any():
+                is_duplicate = True
+        if is_duplicate:
+            print(f"结果已存在于 {output_csv}, 不追加")
         else:
-            df_base = pd.DataFrame(rows_to_save)
+            df_base = pd.concat([df_base, pd.DataFrame([row])], ignore_index=True)
             df_base.to_csv(output_csv, index=False, encoding="utf-8-sig")
-            print(f"本次 {len(rows_to_save)} 个因子结果已保存到 {output_csv}")
+            print(f"本次因子结果已追加到 {output_csv}")
     else:
-        row = {
-            "入库时间": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "因子表达式": formula,
-            "品种选择": SELECTED_SECTOR,
-            "品种合约": str(SYMBOLS),
-            "预测周期": Y_PERIOD,
-            "训练集时间": f"{BEGIN_TIME}~{END_TIME}",
-            "训练集IC": result["temp_train"]['mean_ic'],
-            "训练集IR": result["temp_train"]['icir'],
-            "训练集有效时间点": result["temp_train"]['valid_ts'],
-            "测试集时间": f"{BEGIN_TIME_TEST}~{END_TIME_TEST}",
-            "测试集IC": result["temp_test"]['mean_ic'],
-            "测试集IR": result["temp_test"]['icir'],
-            "测试集有效时间点": result["temp_test"]['valid_ts'],
-            "真实集时间": f"{BEGIN_TIME_NOW}~{END_TIME_NOW}",
-            "真实集IC": result["temp_now"]['mean_ic'],
-            "真实集IR": result["temp_now"]['icir'],
-            "真实集有效时间点": result["temp_now"]['valid_ts']
-        }
+        df_base = pd.DataFrame([row])
+        df_base.to_csv(output_csv, index=False, encoding="utf-8-sig")
+        print(f"本次因子结果已追加到 {output_csv}")
 
-        duplicate_cols = [
-            "因子表达式",
-            "品种合约",
-            "预测周期",
-            "训练集时间",
-            "测试集时间",
-            "真实集时间"
-        ]
 
-        if os.path.exists(output_csv):
-            try:
-                df_base = pd.read_csv(output_csv, dtype=str)
-            except Exception:
-                df_base = pd.DataFrame()
-            is_duplicate = False
-            if not df_base.empty:
-                row_df = pd.DataFrame([{col: str(row[col]) for col in duplicate_cols}])
-                df_cmp = df_base[duplicate_cols].astype(str)
-                matches = (df_cmp == row_df.iloc[0]).all(axis=1)
-                if matches.any():
-                    is_duplicate = True
-            if is_duplicate:
-                print(f"结果已存在于 {output_csv}, 不追加")
-            else:
-                df_base = pd.concat([df_base, pd.DataFrame([row])], ignore_index=True)
-                df_base.to_csv(output_csv, index=False, encoding="utf-8-sig")
-                print(f"本次因子结果已追加到 {output_csv}")
-        else:
-            df_base = pd.DataFrame([row])
-            df_base.to_csv(output_csv, index=False, encoding="utf-8-sig")
-            print(f"本次因子结果已保存到 {output_csv}")
+# ## 准备长表分析数据
+
+def panel_to_long_factor_df(factor_arr, y_arr, pivot_dict, split_name):
+    factor_df = pd.DataFrame(
+        np.asarray(factor_arr, dtype=np.float64),
+        index=pivot_dict['close'].index,
+        columns=pivot_dict['close'].columns,
+    )
+    ret_df = pd.DataFrame(
+        np.asarray(y_arr, dtype=np.float64),
+        index=pivot_dict['future_return'].index,
+        columns=pivot_dict['future_return'].columns,
+    )
+
+    factor_long = factor_df.stack(future_stack=True).rename('factor')
+    ret_long = ret_df.stack(future_stack=True).rename('future_return')
+    out = pd.concat([factor_long, ret_long], axis=1).reset_index()
+    out.columns = ['time', 'code', 'factor', 'future_return']
+    out['split'] = split_name
+    out = out.sort_values(['time', 'code']).reset_index(drop=True)
+    return out
+
+
+analysis_train = panel_to_long_factor_df(factor, y, pivoted, 'train')
+analysis_test = panel_to_long_factor_df(factor_test, y_test, pivoted_test, 'test')
+analysis_now = panel_to_long_factor_df(factor_now, y_now, pivoted_now, 'now')
+
+# print(analysis_train.head())
+
+
+# ## 计算分层收益与多空收益
+def build_quantile_report(long_df, quantiles=5):
+    dfq = long_df.copy()
+    dfq = dfq[np.isfinite(dfq['factor']) & np.isfinite(dfq['future_return'])].copy()
+    if dfq.empty:
+        return pd.DataFrame(), pd.Series(dtype=float)
+
+    def _quantile_by_time(s):
+        if s.notna().sum() < quantiles:
+            return pd.Series(np.nan, index=s.index)
+        try:
+            return pd.qcut(s.rank(method='first'), quantiles, labels=False) + 1
+        except Exception:
+            return pd.Series(np.nan, index=s.index)
+
+    dfq['quantile'] = dfq.groupby('time')['factor'].transform(_quantile_by_time)
+    dfq = dfq.dropna(subset=['quantile']).copy()
+    if dfq.empty:
+        return pd.DataFrame(), pd.Series(dtype=float)
+
+    dfq['quantile'] = dfq['quantile'].astype(int)
+    quantile_ret = dfq.groupby(['time', 'quantile'])['future_return'].mean().unstack()
+    long_short = quantile_ret[quantile_ret.columns.max()] - quantile_ret[quantile_ret.columns.min()]
+    return quantile_ret, long_short
+
+
+def ic_curve_from_long(long_df):
+    rows = []
+    for t, grp in long_df.groupby('time'):
+        grp = grp[np.isfinite(grp['factor']) & np.isfinite(grp['future_return'])]
+        if len(grp) < int(globals().get("MIN_CROSS_SECTION_COUNT", 2)):
+            continue
+        rows.append((t, grp['factor'].rank().corr(grp['future_return'].rank())))
+    if not rows:
+        return pd.Series(dtype=float)
+    s = pd.Series(dict(rows)).sort_index()
+    s.name = 'rank_ic'
+    return s
+
+
+# ===================== 因子分析可视化（自动保存图片） =====================
+
+def save_figure(fig, filename):
+    output_dir = "单因子分析可视化"
+    os.makedirs(output_dir, exist_ok=True)
+    filepath = os.path.join(output_dir, filename)
+    fig.savefig(filepath, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_ic_ir_analysis(ic_series_dict, ir_vals, title="因子 IC / IR 分析"):
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 10))
+    fig.suptitle(title, fontsize=18, fontweight='bold')
+
+    colors = {name: COLORS[i % len(COLORS)] for i, name in enumerate(ic_series_dict.keys())}
+
+    for name, ic in ic_series_dict.items():
+        ax1.plot(ic.index, ic, color=colors[name], linewidth=1.5, label=f"{name} | 均值={ic.mean():.3f}")
+    ax1.axhline(0, color='black', linestyle='--', alpha=0.6)
+    ax1.set_title('IC 时间序列')
+    ax1.legend()
+
+    for name, ic in ic_series_dict.items():
+        ax2.plot(ic.index, ic.rolling(20).mean(), color=colors[name], linewidth=2)
+    ax2.axhline(0, color='black', linestyle='--', alpha=0.6)
+    ax2.set_title('滚动 IC (20期)')
+
+    ic_all = np.concatenate([v.dropna().values for v in ic_series_dict.values()])
+    ax3.hist(ic_all, bins=30, color=COLORS[0], alpha=0.7)
+    ax3.axvline(ic_all.mean(), color='crimson', linewidth=2, label=f"均值={ic_all.mean():.3f}")
+    ax3.set_title('IC 分布')
+    ax3.legend()
+
+    names = list(ir_vals.keys())
+    irs = list(ir_vals.values())
+    ax4.bar(names, irs, color=[colors[name] for name in names], alpha=0.85)
+    for b, v in zip(ax4.patches, irs):
+        ax4.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.02, f"{v:.3f}", ha="center")
+    ax4.axhline(0.2, color='orange', linestyle='--', label="合格 0.2")
+    ax4.axhline(0.5, color='red', linestyle='--', label="优秀 0.5")
+    ax4.set_title('信息比率 IR')
+    ax4.legend()
+
+    plt.tight_layout()
+    save_figure(fig, "IC_IR分析.png")
+
+
+def plot_quantile_return(quantile_ret_dict, title="因子分位数收益"):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10))
+    fig.suptitle(title, fontsize=18, fontweight='bold')
+
+    x = np.arange(1, 6)
+    w = 0.18
+    for i, (name, df) in enumerate(quantile_ret_dict.items()):
+        if df.empty:
+            continue
+        m = df.mean()
+        ax1.bar(x + i * w, m, w, color=COLORS[i], alpha=0.85, label=name)
+    ax1.axhline(0, color='black', linestyle='--', alpha=0.6)
+    ax1.set_title('分位数平均收益')
+    ax1.legend()
+
+    for i, (name, df) in enumerate(quantile_ret_dict.items()):
+        if df.empty or 1 not in df.columns or 5 not in df.columns:
+            continue
+        ls = (df[5] - df[1]).fillna(0).cumsum()
+        ax2.plot(ls.index, ls, color=COLORS[i], linewidth=2.2, label=name)
+    ax2.axhline(0, color='black', linestyle='--', alpha=0.6)
+    ax2.set_title('多空累计收益 5-1')
+    ax2.legend()
+
+    plt.tight_layout()
+    save_figure(fig, "分位数收益.png")
+
+
+def plot_factor_return_dist(quantile_ret):
+    fig, ax = plt.subplots(figsize=(12, 6))
+    data = [quantile_ret[q].dropna().values for q in range(1, 6) if q in quantile_ret]
+    if len(data) > 0:
+        parts = ax.violinplot(data, positions=list(range(1, len(data) + 1)), showmedians=True)
+        for i, b in enumerate(parts['bodies']):
+            b.set_facecolor(COLORS[i % len(COLORS)])
+            b.set_alpha(0.7)
+        parts['cmedians'].set_color('white')
+        parts['cmedians'].set_linewidth(2)
+        ax.set_title('分位数收益分布')
+        ax.set_xticks(list(range(1, len(data) + 1)))
+
+    plt.tight_layout()
+    save_figure(fig, "收益分布.png")
+
+
+def factor_analysis_visualization(ic_series_dict, ir_vals, quantile_ret_dict, quantile_ret):
+    plot_ic_ir_analysis(ic_series_dict, ir_vals)
+    plot_quantile_return(quantile_ret_dict)
+    plot_factor_return_dist(quantile_ret)
+    print('所有图表已生成！单因子分析结束')
+
+
+def build_visualization_data():
+    ic_series_dict = {}
+    ir_vals = {}
+    quantile_ret_dict = {}
+
+    for split_name, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
+        ic_s = ic_curve_from_long(long_df)
+        qret, _ = build_quantile_report(long_df, quantiles=QUANTILES)
+
+        ic_series_dict[split_name] = ic_s
+        ir_vals[split_name] = ic_s.mean() / (ic_s.std() + 1e-8) if not ic_s.empty else 0.0
+        quantile_ret_dict[split_name] = qret
+
+    quantile_ret = {}
+    for qret in quantile_ret_dict.values():
+        if not qret.empty:
+            quantile_ret.update({q: qret[q].dropna() for q in qret.columns if q in range(1, QUANTILES + 1)})
+
+    return ic_series_dict, ir_vals, quantile_ret_dict, quantile_ret
 
 
 for split_name, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
@@ -4034,959 +3415,72 @@ for split_name, long_df in [('训练集', analysis_train), ('测试集', analysi
 
 
 # ## 绘制 Rolling IC 与多空累计收益
-output_dir = "多因子分析可视化"
+plt.figure(figsize=(12, 4))
+for label, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
+    ic_s = ic_curve_from_long(long_df)
+    if not ic_s.empty:
+        ic_s.rolling(20, min_periods=5).mean().plot(label=f'{label} Rolling IC(20)')
+plt.axhline(0.0, linestyle='--')
+plt.title('Rolling Rank IC')
+plt.legend()
+output_dir = "单因子分析可视化"
 os.makedirs(output_dir, exist_ok=True)
+plt.savefig(os.path.join(output_dir, '滚动IC.png'), dpi=150, bbox_inches='tight')
+plt.close()
 
-if isinstance(formula, list):
-    for analysis in all_analysis:
-        factor_idx = analysis['factor_index']
-        factor_expr = analysis['formula']
-        safe_expr = "".join(c if c.isalnum() or c in ('_', '-', '(' , ')', '+', '*', '/') else '_' for c in factor_expr)[:50]
-        
-        plt.figure(figsize=(12, 4))
-        for label, long_df in [('训练集', analysis['train']), ('测试集', analysis['test']), ('真实集', analysis['now'])]:
-            ic_s = ic_curve_from_long(long_df)
-            if not ic_s.empty:
-                ic_s.rolling(20, min_periods=5).mean().plot(label=f'{label} Rolling IC(20)')
-        plt.axhline(0.0, linestyle='--')
-        plt.title(f'因子{factor_idx} Rolling Rank IC\n{factor_expr}')
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/因子{factor_idx}_Rolling_IC.png", dpi=150)
-        plt.close()
-
-        plt.figure(figsize=(12, 4))
-        for label, long_df in [('训练集', analysis['train']), ('测试集', analysis['test']), ('真实集', analysis['now'])]:
-            _, ls = build_quantile_report(long_df, quantiles=QUANTILES)
-            if not ls.empty:
-                ls.fillna(0).cumsum().plot(label=f'{label} 多空累计收益')
-        plt.axhline(0.0, linestyle='--')
-        plt.title(f'因子{factor_idx} 多空累计收益\n{factor_expr}')
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/因子{factor_idx}_多空累计收益.png", dpi=150)
-        plt.close()
-else:
-    plt.figure(figsize=(12, 4))
-    for label, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
-        ic_s = ic_curve_from_long(long_df)
-        if not ic_s.empty:
-            ic_s.rolling(20, min_periods=5).mean().plot(label=f'{label} Rolling IC(20)')
-    plt.axhline(0.0, linestyle='--')
-    plt.title('Rolling Rank IC')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/单因子_Rolling_IC.png", dpi=150)
-    plt.close()
-
-    plt.figure(figsize=(12, 4))
-    for label, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
-        _, ls = build_quantile_report(long_df, quantiles=QUANTILES)
-        if not ls.empty:
-            ls.fillna(0).cumsum().plot(label=f'{label} 多空累计收益')
-    plt.axhline(0.0, linestyle='--')
-    plt.title('Top-Bottom Quantile Long-Short Cumulative Return')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/单因子_多空累计收益.png", dpi=150)
-    plt.close()
+plt.figure(figsize=(12, 4))
+for label, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
+    _, ls = build_quantile_report(long_df, quantiles=QUANTILES)
+    if not ls.empty:
+        ls.fillna(0).cumsum().plot(label=f'{label} 多空累计收益')
+plt.axhline(0.0, linestyle='--')
+plt.title('Top-Bottom Quantile Long-Short Cumulative Return')
+plt.legend()
+plt.savefig(os.path.join(output_dir, '多空累计收益.png'), dpi=150, bbox_inches='tight')
+plt.close()
 
 
+# ===================== 自动可视化输出 =====================
+ic_series_dict, ir_vals, quantile_ret_dict, quantile_ret = build_visualization_data()
+factor_analysis_visualization(ic_series_dict, ir_vals, quantile_ret_dict, quantile_ret)
 
 
-# ==================== LightGBM 多因子合成模型 ====================
-# 仅在多因子列表（公式个数 > 1）时执行
-if isinstance(formula, list) and len(formula) > 1 and USE_LIGHTGBM:
-    print("\n" + "="*60)
-    print("开始 LightGBM 多因子合成模型训练与评估")
-    print("="*60)
+# ## 可选：准备 Alphalens 数据格式
+def prepare_alphalens_inputs(long_df, pivot_close):
+    factor_series = (
+        long_df[['time', 'code', 'factor']]
+        .dropna()
+        .set_index(['time', 'code'])['factor']
+        .sort_index()
+    )
+    price_df = pivot_close.sort_index().sort_index(axis=1)
+    return factor_series, price_df
 
-    # ---------- 1. 获取已计算好的因子数组 ----------
-    factor_list_train = factors["factor"]      # list of (T_train, N) arrays
-    factor_list_test  = factors["factor_test"] # list of (T_test, N) arrays
-    factor_list_now   = factors["factor_now"]  # list of (T_now, N) arrays
-    K = len(factor_list_train)                 # 因子个数
 
-    # 面板形状
-    T_train, N = factor_list_train[0].shape
-    T_test, _  = factor_list_test[0].shape
-    T_now, _   = factor_list_now[0].shape
-
-    # ---------- 2. 堆叠为三维数组 (T, N, K) ----------
-    X_train_raw = np.stack(factor_list_train, axis=2)
-    X_test_raw  = np.stack(factor_list_test,  axis=2)
-    X_now_raw   = np.stack(factor_list_now,   axis=2)
-
-    # ---------- 3. 横截面标准化 (每个时间点，每个因子独立标准化) ----------
-    def cross_sectional_standardize(X):
-        """X: (T, N, K) -> 返回相同形状，NaN保持原位"""
-        X_std = np.full_like(X, np.nan, dtype=np.float64)
-        for t in range(X.shape[0]):
-            for k in range(X.shape[2]):
-                col = X[t, :, k]
-                mask = np.isfinite(col)
-                if mask.sum() < 2:
-                    continue
-                mean = col[mask].mean()
-                std  = col[mask].std()
-                if std > 1e-8:
-                    X_std[t, mask, k] = (col[mask] - mean) / std
-                else:
-                    X_std[t, mask, k] = 0.0
-        return X_std
-
-    X_train = cross_sectional_standardize(X_train_raw)
-    X_test  = cross_sectional_standardize(X_test_raw)
-    X_now   = cross_sectional_standardize(X_now_raw)
-
-    # ---------- 4. 展平为 DataFrame，保留时间和资产标签 ----------
-    times_train = pivoted['close'].index
-    assets_train = pivoted['close'].columns
-    times_test  = pivoted_test['close'].index
-    assets_test  = pivoted_test['close'].columns
-    times_now   = pivoted_now['close'].index
-    assets_now   = pivoted_now['close'].columns
-
-    def flatten_panel(X, y_arr, times, assets):
-        """将 (T,N,K) 和 (T,N) 展平为 DataFrame，跳过目标为 NaN 的行"""
-        T, N, K = X.shape
-        records = []
-        for t in range(T):
-            for n in range(N):
-                if np.isnan(y_arr[t, n]):
-                    continue
-                record = {
-                    'time': times[t],
-                    'asset': assets[n],
-                    'target': y_arr[t, n]
-                }
-                for k in range(K):
-                    record[f'factor_{k}'] = X[t, n, k]
-                records.append(record)
-        return pd.DataFrame(records)
-
-    df_train = flatten_panel(X_train, y, times_train, assets_train)
-    df_test  = flatten_panel(X_test,  y_test, times_test, assets_test)
-    df_now   = flatten_panel(X_now,   y_now,  times_now,  assets_now)
-
-    feature_cols = [f'factor_{k}' for k in range(K)]
-
-    # ---------- 5. 配置 LightGBM 参数（可在此处修改） ----------
-    lgb_params = {
-        'n_estimators': 200,
-        'learning_rate': 0.05,
-        'max_depth': 6,
-        'subsample': 0.8,
-        'colsample_bytree': 0.8,
-        'reg_alpha': 0.1,
-        'reg_lambda': 0.1,
-        'min_child_samples': 20,
-        'random_state': 42,
-        'verbosity': -1
-    }
-
-    model = lgb.LGBMRegressor(**lgb_params)
-    model.fit(df_train[feature_cols], df_train['target'])
-
-    # ---------- 6. 预测 ----------
-    df_train['pred'] = model.predict(df_train[feature_cols])
-    df_test['pred']  = model.predict(df_test[feature_cols])
-    df_now['pred']   = model.predict(df_now[feature_cols])
-
-    # ---------- 7. 将预测值还原为面板格式 (T, N) ----------
-    def predictions_to_panel(df_pred, times, assets, target_shape):
-        pred_panel = np.full(target_shape, np.nan, dtype=np.float64)
-        time_to_idx = {t: i for i, t in enumerate(times)}
-        asset_to_idx = {a: j for j, a in enumerate(assets)}
-        for _, row in df_pred.iterrows():
-            i = time_to_idx.get(row['time'])
-            j = asset_to_idx.get(row['asset'])
-            if i is not None and j is not None:
-                pred_panel[i, j] = row['pred']
-        return pred_panel
-
-    pred_panel_train = predictions_to_panel(df_train, times_train, assets_train, y.shape)
-    pred_panel_test  = predictions_to_panel(df_test,  times_test,  assets_test,  y_test.shape)
-    pred_panel_now   = predictions_to_panel(df_now,   times_now,   assets_now,   y_now.shape)
-
-    # ---------- 8. 评估合成因子（复用已有评估函数） ----------
-    def evaluate_synthetic_factor(pred_panel, y_arr, pivoted_dict, name):
-        long_df = panel_to_long_factor_df(pred_panel, y_arr, pivoted_dict, name)
-        ic_s = ic_curve_from_long(long_df)
-        qret, ls = build_quantile_report(long_df, quantiles=QUANTILES)
-        print(f"\n===== {name} =====")
-        print(f"有效IC时间点: {ic_s.shape[0]}")
-        if not ic_s.empty:
-            mean_ic = ic_s.mean()
-            icir = mean_ic / (ic_s.std() + 1e-8)
-            print(f"平均IC: {mean_ic:.6f}, ICIR: {icir:.6f}")
-        if not qret.empty:
-            print("各分位平均未来收益:")
-            print(qret.mean().to_frame('收益').T)
-            print("多空组合统计:")
-            print(ls.describe().to_frame('统计'))
-        return ic_s, qret, ls
-
-    print("\n--- LightGBM 合成因子评估 ---")
-    ic_train, _, _ = evaluate_synthetic_factor(pred_panel_train, y, pivoted, "训练集")
-    ic_test,  _, _ = evaluate_synthetic_factor(pred_panel_test,  y_test, pivoted_test, "测试集")
-    ic_now,   _, _ = evaluate_synthetic_factor(pred_panel_now,   y_now,  pivoted_now,  "真实集")
-
-    # ---------- 9. 特征重要性 ----------
-    importance = model.feature_importances_
-    indices = np.argsort(importance)[::-1]
-    print("\n特征重要性（按降序排列，对应原始公式列表）:")
-    for i in indices:
-        expr = formula[i] if i < len(formula) else f"因子{i}"
-        print(f"  {expr}: {importance[i]}")
-
-    # ---------- 10. 绘图 ----------
-    # Rolling IC 曲线
-    plt.figure(figsize=(12, 4))
-    if not ic_train.empty:
-        ic_train.rolling(20, min_periods=5).mean().plot(label='训练集 Rolling IC(20)')
-    if not ic_test.empty:
-        ic_test.rolling(20, min_periods=5).mean().plot(label='测试集 Rolling IC(20)')
-    if not ic_now.empty:
-        ic_now.rolling(20, min_periods=5).mean().plot(label='真实集 Rolling IC(20)')
-    plt.axhline(0.0, linestyle='--')
-    plt.title('LightGBM 合成因子 Rolling Rank IC')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/LightGBM_Rolling_IC.png", dpi=150)
-    plt.close()
-
-    # 多空累计收益曲线
-    plt.figure(figsize=(12, 4))
-    for name, pred_panel, y_arr, piv in [
-        ('训练集', pred_panel_train, y, pivoted),
-        ('测试集', pred_panel_test,  y_test, pivoted_test),
-        ('真实集', pred_panel_now,   y_now,  pivoted_now)
-    ]:
-        long_df = panel_to_long_factor_df(pred_panel, y_arr, piv, name)
-        _, ls = build_quantile_report(long_df, quantiles=QUANTILES)
-        if not ls.empty:
-            ls.fillna(0).cumsum().plot(label=f'{name} 多空累计收益')
-    plt.axhline(0.0, linestyle='--')
-    plt.title('LightGBM 合成因子 Top-Bottom 多空累计收益')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/LightGBM_多空累计收益.png", dpi=150)
-    plt.close()
-
-    # 真实集预测值与真实值散点图
-    if not df_now.empty:
-        plt.figure(figsize=(6, 6))
-        plt.scatter(df_now['pred'], df_now['target'], alpha=0.3, s=1)
-        plt.xlabel('预测值')
-        plt.ylabel('真实未来收益')
-        plt.title('真实集：预测 vs 真实')
-        plt.grid(True)
-        plt.savefig(f"{output_dir}/LightGBM_预测vs真实.png", dpi=150)
-        plt.close()
-
-    # ========== LightGBM 扩展可视化 ==========
+if USE_ALPHALENS:
+    factor_train_al, prices_train_al = prepare_alphalens_inputs(analysis_train, pivoted['close'])
     try:
-        import shap
-        SHAP_AVAILABLE = True
-    except ImportError:
-        SHAP_AVAILABLE = False
-        print("警告: shap 库未安装，跳过 SHAP 全局解释图。")
-
-    # ---------- 1. 特征重要性条形图 (基于 LightGBM 内置) ----------
-    plt.figure(figsize=(10, 6))
-    importance = model.feature_importances_
-    indices = np.argsort(importance)[::-1]
-    sorted_names = [formula[i] for i in indices]
-    sorted_imp = importance[indices]
-    plt.barh(range(len(sorted_names)), sorted_imp[::-1], color='steelblue')
-    plt.yticks(range(len(sorted_names)), sorted_names[::-1])
-    plt.xlabel('特征重要性 (Gain)')
-    plt.title('LightGBM 特征重要性条形图')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'LightGBM_特征重要性.png'), dpi=150)
-    plt.close()
-
-    # ---------- 2. 残差分析图 (使用真实集) ----------
-    if not df_now.empty:
-        residuals = df_now['target'] - df_now['pred']
-        residuals = residuals.dropna()
-        if len(residuals) > 0:
-            fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-            # 直方图 + KDE
-            axes[0].hist(residuals, bins=50, density=True, alpha=0.7, color='skyblue', edgecolor='black')
-            residuals.plot.kde(ax=axes[0], color='red', linewidth=2)
-            axes[0].set_xlabel('残差')
-            axes[0].set_ylabel('密度')
-            axes[0].set_title('残差分布 (真实集)')
-            axes[0].axvline(x=0, color='black', linestyle='--')
-            # Q-Q 图
-            from scipy import stats
-            stats.probplot(residuals, dist="norm", plot=axes[1])
-            axes[1].set_title('Q-Q 图 (真实集)')
-            axes[1].get_lines()[0].set_color('steelblue')
-            axes[1].get_lines()[1].set_color('red')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'LightGBM_残差分析.png'), dpi=150)
-            plt.close()
-
-    # ---------- 3. 时间序列预测误差 (按时间聚合 MAE) ----------
-    if not df_now.empty:
-        # 按时间计算每个时间点的 MAE
-        time_mae = df_now.groupby('time').apply(
-            lambda g: np.mean(np.abs(g['target'] - g['pred'])), include_groups=False
-        ).reset_index(name='MAE')
-        time_mae = time_mae.sort_values('time')
-        plt.figure(figsize=(12, 5))
-        plt.plot(time_mae['time'], time_mae['MAE'], marker='o', linestyle='-', linewidth=1, markersize=3)
-        plt.axhline(y=time_mae['MAE'].mean(), color='red', linestyle='--', label=f"平均 MAE = {time_mae['MAE'].mean():.5f}")
-        plt.xlabel('时间')
-        plt.ylabel('平均绝对误差 (MAE)')
-        plt.title('真实集上预测误差随时间变化')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'LightGBM_时间序列误差.png'), dpi=150)
-        plt.close()
-
-    # ---------- 4. 分位数预测表现 (预测值分组下的实际收益) ----------
-    if not df_now.empty:
-        df_q = df_now[['pred', 'target']].dropna().copy()
-        if len(df_q) > 0:
-            # 使用全局分位数 (例如 10 组，或沿用 QUANTILES)
-            n_quantiles = QUANTILES if QUANTILES >= 2 else 5
-            try:
-                df_q['pred_quantile'] = pd.qcut(df_q['pred'], q=n_quantiles, labels=False) + 1
-            except ValueError:
-                # 分位数边缘重复时使用 rank 方法
-                df_q['pred_quantile'] = pd.qcut(df_q['pred'].rank(method='first'), q=n_quantiles, labels=False) + 1
-            quantile_perf = df_q.groupby('pred_quantile')['target'].mean()
-            plt.figure(figsize=(8, 5))
-            plt.bar(quantile_perf.index, quantile_perf.values, color='teal', alpha=0.7)
-            plt.axhline(y=0, color='black', linestyle='--')
-            plt.xlabel('预测值分位数')
-            plt.ylabel('实际未来收益均值')
-            plt.title(f'分位数预测表现 (真实集, {n_quantiles} 组)')
-            plt.xticks(quantile_perf.index)
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'LightGBM_分位数预测表现.png'), dpi=150)
-            plt.close()
-
-    # ---------- 5. SHAP 全局解释 (使用真实集或测试集) ----------
-    if SHAP_AVAILABLE and not df_now.empty:
-        try:
-            # 为避免内存过大，随机采样部分样本计算 SHAP 值
-            sample_size = min(5000, len(df_now))
-            df_sample = df_now.sample(n=sample_size, random_state=42)
-            X_sample = df_sample[feature_cols]
-            # 创建 TreeExplainer
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(X_sample)
-            # 全局特征重要性：平均绝对 SHAP 值
-            mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
-            # 条形图
-            plt.figure(figsize=(10, 6))
-            sorted_idx = np.argsort(mean_abs_shap)[::-1]
-            sorted_names_shap = [formula[i] for i in sorted_idx]
-            sorted_shap = mean_abs_shap[sorted_idx]
-            plt.barh(range(len(sorted_names_shap)), sorted_shap[::-1], color='darkorange')
-            plt.yticks(range(len(sorted_names_shap)), sorted_names_shap[::-1])
-            plt.xlabel('平均 |SHAP 值|')
-            plt.title('SHAP 全局特征重要性 (真实集)')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'LightGBM_SHAP全局特征重要性.png'), dpi=150)
-            plt.close()
-            # 可选：summary plot (若需要更丰富的可视化)
-            # shap.summary_plot(shap_values, X_sample, feature_names=formula, show=False)
-            # plt.savefig(os.path.join(output_dir, 'lgb_shap_summary.png'), dpi=150, bbox_inches='tight')
-            # plt.close()
-        except Exception as e:
-            print(f"SHAP 可视化失败: {e}")
-    elif not SHAP_AVAILABLE:
-        print("跳过 SHAP 图 (未安装 shap 库)")
-
-    print("\nLightGBM 多因子合成模型分析完成。")
-
-
-
-
-
-
-# ==================== Elastic Net 多因子合成模型 ====================
-# 仅在多因子列表（公式个数 > 1）时执行
-if isinstance(formula, list) and len(formula) > 1 and USE_ELASTIC_NET:
-    try:
-        from sklearn.linear_model import ElasticNet
-        from sklearn.metrics import mean_squared_error, mean_absolute_error
-        from sklearn.impute import SimpleImputer
-    except ImportError:
-        raise ImportError("请先安装 scikit-learn: pip install scikit-learn")
-
-    print("\n" + "="*60)
-    print("开始 Elastic Net 多因子合成模型训练与评估")
-    print("="*60)
-
-    # ---------- 1. 获取已计算好的因子数组 ----------
-    factor_list_train = factors["factor"]      # list of (T_train, N) arrays
-    factor_list_test  = factors["factor_test"] # list of (T_test, N) arrays
-    factor_list_now   = factors["factor_now"]  # list of (T_now, N) arrays
-    K = len(factor_list_train)                 # 因子个数
-
-    # 面板形状
-    T_train, N = factor_list_train[0].shape
-    T_test, _  = factor_list_test[0].shape
-    T_now, _   = factor_list_now[0].shape
-
-    # ---------- 2. 堆叠为三维数组 (T, N, K) ----------
-    X_train_raw = np.stack(factor_list_train, axis=2)
-    X_test_raw  = np.stack(factor_list_test,  axis=2)
-    X_now_raw   = np.stack(factor_list_now,   axis=2)
-
-    # ---------- 3. 横截面标准化 (每个时间点，每个因子独立标准化) ----------
-    def cross_sectional_standardize(X):
-        X_std = np.full_like(X, np.nan, dtype=np.float64)
-        for t in range(X.shape[0]):
-            for k in range(X.shape[2]):
-                col = X[t, :, k]
-                mask = np.isfinite(col)
-                if mask.sum() < 2:
-                    continue
-                mean = col[mask].mean()
-                std  = col[mask].std()
-                if std > 1e-8:
-                    X_std[t, mask, k] = (col[mask] - mean) / std
-                else:
-                    X_std[t, mask, k] = 0.0
-        return X_std
-
-    X_train_std = cross_sectional_standardize(X_train_raw)
-    X_test_std  = cross_sectional_standardize(X_test_raw)
-    X_now_std   = cross_sectional_standardize(X_now_raw)
-
-    # ---------- 4. 处理缺失值：将 NaN 填充为 0（标准化后 NaN 代表无有效计算值） ----------
-    # 使用 SimpleImputer 可更灵活，这里直接 fillna(0) 更简单
-    def fill_nan_with_zero(X):
-        X_filled = X.copy()
-        X_filled[np.isnan(X_filled)] = 0.0
-        return X_filled
-
-    X_train = fill_nan_with_zero(X_train_std)
-    X_test  = fill_nan_with_zero(X_test_std)
-    X_now   = fill_nan_with_zero(X_now_std)
-
-    # ---------- 5. 展平为 DataFrame，保留时间和资产标签 ----------
-    times_train = pivoted['close'].index
-    assets_train = pivoted['close'].columns
-    times_test  = pivoted_test['close'].index
-    assets_test  = pivoted_test['close'].columns
-    times_now   = pivoted_now['close'].index
-    assets_now   = pivoted_now['close'].columns
-
-    def flatten_panel(X, y_arr, times, assets):
-        T, N, K = X.shape
-        records = []
-        for t in range(T):
-            for n in range(N):
-                if np.isnan(y_arr[t, n]):
-                    continue
-                record = {
-                    'time': times[t],
-                    'asset': assets[n],
-                    'target': y_arr[t, n]
-                }
-                for k in range(K):
-                    record[f'factor_{k}'] = X[t, n, k]
-                records.append(record)
-        return pd.DataFrame(records)
-
-    df_train = flatten_panel(X_train, y, times_train, assets_train)
-    df_test  = flatten_panel(X_test,  y_test, times_test, assets_test)
-    df_now   = flatten_panel(X_now,   y_now,  times_now,  assets_now)
-
-    feature_cols = [f'factor_{k}' for k in range(K)]
-
-    # ---------- 6. 配置 Elastic Net 参数（可在此处修改） ----------
-    # alpha: 正则化强度，l1_ratio: L1 比例 (0 = 岭回归, 1 = Lasso)
-    enet_params = {
-        'alpha': 0.05,          # 正则化强度，越大系数越稀疏
-        'l1_ratio': 0.5,       # 0.5 表示 Elastic Net 混合
-        'fit_intercept': True,
-        'max_iter': 5000,
-        'random_state': 42,
-        'selection': 'cyclic'
-    }
-    model = ElasticNet(**enet_params)
-    model.fit(df_train[feature_cols], df_train['target'])
-
-    # ---------- 7. 预测 ----------
-    df_train['pred'] = model.predict(df_train[feature_cols])
-    df_test['pred']  = model.predict(df_test[feature_cols])
-    df_now['pred']   = model.predict(df_now[feature_cols])
-
-    # ---------- 8. 将预测值还原为面板格式 (T, N) ----------
-    def predictions_to_panel(df_pred, times, assets, target_shape):
-        pred_panel = np.full(target_shape, np.nan, dtype=np.float64)
-        time_to_idx = {t: i for i, t in enumerate(times)}
-        asset_to_idx = {a: j for j, a in enumerate(assets)}
-        for _, row in df_pred.iterrows():
-            i = time_to_idx.get(row['time'])
-            j = asset_to_idx.get(row['asset'])
-            if i is not None and j is not None:
-                pred_panel[i, j] = row['pred']
-        return pred_panel
-
-    pred_panel_train = predictions_to_panel(df_train, times_train, assets_train, y.shape)
-    pred_panel_test  = predictions_to_panel(df_test,  times_test,  assets_test,  y_test.shape)
-    pred_panel_now   = predictions_to_panel(df_now,   times_now,   assets_now,   y_now.shape)
-
-    # ---------- 9. 评估合成因子（复用已有评估函数） ----------
-    def evaluate_synthetic_factor(pred_panel, y_arr, pivoted_dict, name):
-        long_df = panel_to_long_factor_df(pred_panel, y_arr, pivoted_dict, name)
-        ic_s = ic_curve_from_long(long_df)
-        qret, ls = build_quantile_report(long_df, quantiles=QUANTILES)
-        print(f"\n===== {name} =====")
-        print(f"有效IC时间点: {ic_s.shape[0]}")
-        if not ic_s.empty:
-            mean_ic = ic_s.mean()
-            icir = mean_ic / (ic_s.std() + 1e-8)
-            print(f"平均IC: {mean_ic:.6f}, ICIR: {icir:.6f}")
-        if not qret.empty:
-            print("各分位平均未来收益:")
-            print(qret.mean().to_frame('收益').T)
-            print("多空组合统计:")
-            print(ls.describe().to_frame('统计'))
-        return ic_s, qret, ls
-
-    print("\n--- Elastic Net 合成因子评估 ---")
-    ic_train, _, _ = evaluate_synthetic_factor(pred_panel_train, y, pivoted, "训练集")
-    ic_test,  _, _ = evaluate_synthetic_factor(pred_panel_test,  y_test, pivoted_test, "测试集")
-    ic_now,   _, _ = evaluate_synthetic_factor(pred_panel_now,   y_now,  pivoted_now,  "真实集")
-
-    # ---------- 10. 输出模型系数（特征重要性） ----------
-    coefficients = model.coef_
-    print("\nElastic Net 系数（按因子顺序，非零系数表示被选中）:")
-    for i, coef in enumerate(coefficients):
-        expr = formula[i] if i < len(formula) else f"因子{i}"
-        print(f"  {expr}: {coef:.6f}")
-
-    # 输出截距
-    print(f"截距 (intercept): {model.intercept_:.6f}")
-
-    # 可选：输出训练集上的 MSE/MAE
-    train_mse = mean_squared_error(df_train['target'], df_train['pred'])
-    train_mae = mean_absolute_error(df_train['target'], df_train['pred'])
-    print(f"\n训练集 MSE: {train_mse:.6f}, MAE: {train_mae:.6f}")
-
-    # ---------- 11. 绘图 ----------
-    # Rolling IC 曲线
-    plt.figure(figsize=(12, 4))
-    if not ic_train.empty:
-        ic_train.rolling(20, min_periods=5).mean().plot(label='训练集 Rolling IC(20)')
-    if not ic_test.empty:
-        ic_test.rolling(20, min_periods=5).mean().plot(label='测试集 Rolling IC(20)')
-    if not ic_now.empty:
-        ic_now.rolling(20, min_periods=5).mean().plot(label='真实集 Rolling IC(20)')
-    plt.axhline(0.0, linestyle='--')
-    plt.title('Elastic Net 合成因子 Rolling Rank IC')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'ElasticNet_滚动IC.png'), dpi=150, bbox_inches='tight')
-    plt.close()
-
-    # 多空累计收益曲线
-    plt.figure(figsize=(12, 4))
-    for name, pred_panel, y_arr, piv in [
-        ('训练集', pred_panel_train, y, pivoted),
-        ('测试集', pred_panel_test,  y_test, pivoted_test),
-        ('真实集', pred_panel_now,   y_now,  pivoted_now)
-    ]:
-        long_df = panel_to_long_factor_df(pred_panel, y_arr, piv, name)
-        _, ls = build_quantile_report(long_df, quantiles=QUANTILES)
-        if not ls.empty:
-            ls.fillna(0).cumsum().plot(label=f'{name} 多空累计收益')
-    plt.axhline(0.0, linestyle='--')
-    plt.title('Elastic Net 合成因子 Top-Bottom 多空累计收益')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'ElasticNet_多空累计收益.png'), dpi=150, bbox_inches='tight')
-    plt.close()
-
-    # 真实集预测值与真实值散点图
-    if not df_now.empty:
-        plt.figure(figsize=(6, 6))
-        plt.scatter(df_now['pred'], df_now['target'], alpha=0.3, s=1)
-        plt.xlabel('预测值')
-        plt.ylabel('真实未来收益')
-        plt.title('真实集：预测 vs 真实')
-        plt.grid(True)
-        plt.savefig(os.path.join(output_dir, 'ElasticNet_预测vs真实.png'), dpi=150, bbox_inches='tight')
-        plt.close()
-
-    # ========== Elastic Net 扩展可视化 ==========
-    output_dir = "多因子分析可视化"
-    os.makedirs(output_dir, exist_ok=True)
-
-    # ---------- 1. 系数条形图 ----------
-    coefficients = model.coef_
-    intercept = model.intercept_
-    # 按系数绝对值排序
-    coef_series = pd.Series(coefficients, index=formula)
-    coef_series_sorted = coef_series.reindex(coef_series.abs().sort_values(ascending=False).index)
-    
-    plt.figure(figsize=(10, 6))
-    colors = ['red' if c < 0 else 'green' for c in coef_series_sorted.values]
-    plt.barh(range(len(coef_series_sorted)), coef_series_sorted.values, color=colors, alpha=0.7)
-    plt.yticks(range(len(coef_series_sorted)), coef_series_sorted.index)
-    plt.axvline(x=0, color='black', linestyle='--')
-    plt.xlabel('系数值')
-    plt.title('Elastic Net 系数条形图 (红色为负, 绿色为正)')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'ElasticNet_系数条形图.png'), dpi=150)
-    plt.close()
-
-    # ---------- 2. 正则化路径图 (不同 alpha 下的系数变化) ----------
-    # 使用训练集数据，拟合一系列 alpha 值 (从大到小)
-    alphas = np.logspace(-3, 1, 50)  # 0.001 到 10
-    coef_path = []
-    for a in alphas:
-        enet = ElasticNet(alpha=a, l1_ratio=enet_params.get('l1_ratio', 0.5), 
-                          fit_intercept=True, max_iter=5000, random_state=42)
-        enet.fit(df_train[feature_cols], df_train['target'])
-        coef_path.append(enet.coef_)
-    coef_path = np.array(coef_path)  # (len(alphas), K)
-    
-    plt.figure(figsize=(10, 6))
-    for i in range(K):
-        plt.plot(alphas, coef_path[:, i], label=formula[i], linewidth=1.5)
-    plt.xscale('log')
-    plt.xlabel('alpha (正则化强度)')
-    plt.ylabel('系数值')
-    plt.title('Elastic Net 正则化路径图 (l1_ratio = {})'.format(enet_params.get('l1_ratio', 0.5)))
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'ElasticNet_正则化路径图.png'), dpi=150, bbox_inches='tight')
-    plt.close()
-
-    # ---------- 3. 预测残差分布直方图 (使用真实集) ----------
-    if not df_now.empty:
-        residuals = df_now['target'] - df_now['pred']
-        residuals = residuals.dropna()
-        if len(residuals) > 0:
-            plt.figure(figsize=(10, 5))
-            plt.hist(residuals, bins=50, density=True, alpha=0.7, color='purple', edgecolor='black')
-            # 添加正态分布拟合曲线
-            from scipy.stats import norm
-            mu, std = norm.fit(residuals)
-            xmin, xmax = plt.xlim()
-            x = np.linspace(xmin, xmax, 100)
-            p = norm.pdf(x, mu, std)
-            plt.plot(x, p, 'k', linewidth=2, label=f'正态拟合 (μ={mu:.4f}, σ={std:.4f})')
-            plt.xlabel('残差')
-            plt.ylabel('密度')
-            plt.title('Elastic Net 预测残差分布 (真实集)')
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'ElasticNet_残差分布直方图.png'), dpi=150)
-            plt.close()
-
-    # ---------- 4. 时间截面性能热力图 ----------
-    # 构造每个时间点、每个合约的残差 (或绝对误差) 矩阵，绘制热力图展示误差分布
-    if not df_now.empty:
-        # 构建面板残差
-        residual_panel = np.full_like(y_now, np.nan)
-        time_to_idx = {t: i for i, t in enumerate(times_now)}
-        asset_to_idx = {a: j for j, a in enumerate(assets_now)}
-        for _, row in df_now.iterrows():
-            i = time_to_idx.get(row['time'])
-            j = asset_to_idx.get(row['asset'])
-            if i is not None and j is not None:
-                residual_panel[i, j] = row['target'] - row['pred']
-        
-        # 选择部分时间点避免热力图过大 (例如最多显示 50 个时间点)
-        n_times_show = min(50, residual_panel.shape[0])
-        if n_times_show > 1:
-            # 取最后 n_times_show 个时间点 (或者均匀采样)
-            step = max(1, residual_panel.shape[0] // n_times_show)
-            indices = np.arange(0, residual_panel.shape[0], step)[:n_times_show]
-            sub_residual = residual_panel[indices, :]
-            sub_times = [times_now[i] for i in indices]
-            
-            # 可选：对每个时间点标准化残差以突出异常
-            # 这里直接绘制原始残差
-            
-            plt.figure(figsize=(12, 8))
-            im = plt.imshow(sub_residual, aspect='auto', cmap='RdBu', vmin=-np.nanpercentile(sub_residual, 2), 
-                            vmax=np.nanpercentile(sub_residual, 98))
-            plt.colorbar(im, label='残差值')
-            plt.yticks(range(len(sub_times)), [str(t)[:10] for t in sub_times], fontsize=8)
-            plt.xticks(range(len(assets_now)), assets_now, rotation=90, fontsize=6)
-            plt.xlabel('合约')
-            plt.ylabel('时间')
-            plt.title('Elastic Net 残差热力图 (真实集部分时间截面)')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, 'ElasticNet_残差热力图.png'), dpi=150)
-            plt.close()
-
-    print("\nElastic Net 多因子合成模型分析完成。")
-
-
-
-
-def integrate_instashap_to_factor_analysis(
-    factor_list: List[np.ndarray],   # 每个因子形状 (T, N)
-    factor_names: List[str],
-    y: np.ndarray,                   # 未来收益，形状 (T, N)
-    y_test: np.ndarray,
-    y_now: np.ndarray,
-    pivoted: Dict[str, pd.DataFrame],  # 时间×合约数据
-    config: Dict = None
-):
-    """
-    将多个因子作为输入特征，训练 InstaSHAP 模型解释因子组合
-    """
-    # 1. 重塑数据：将 (T, N) 转换为 (T*N, M) 格式
-    T, N = y.shape
-    M = len(factor_list)
-    
-    X_flat = np.column_stack([f.flatten() for f in factor_list])  # (T*N, M)
-    y_flat = y.flatten()  # (T*N,)
-    
-    # 去除 NaN
-    valid_mask = ~(np.isnan(X_flat).any(axis=1) | np.isnan(y_flat))
-    X_clean = X_flat[valid_mask]
-    y_clean = y_flat[valid_mask]
-    
-    print(f"InstaSHAP 训练数据准备完成: X.shape={X_clean.shape}, y.shape={y_clean.shape}")
-    
-    # 2. 创建 InstaSHAP 模型（将因子视为"特征"）
-    # 注意：k 表示因子交互阶数，建议 k=2
-    model = InstaSHAPGAM(
-        n_features=M,
-        k=2,  # 包含二阶因子交互
-        feature_names=factor_names,
-        hidden_dims=[128, 64, 32],
-        activation="relu"
-    )
-    
-    # 3. 训练
-    trainer = InstaSHAPTrainer(
-        model=model,
-        blackbox_model=None,  # 我们直接使用 y 作为 f(x;S) 的近似
-        lr=1e-3,
-        device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    )
-    
-    history = trainer.train(
-        X_train=X_clean,
-        y_train=y_clean,
-        X_val=None,  # 可添加验证集
-        y_val=None,
-        epochs=50,
-        batch_size=256,
-        verbose=True
-    )
-    
-    # 4. 计算 SHAP 值（因子重要性）
-    shapley_values = trainer.explain(X_clean)
-    
-    # 5. 分析结果
-    mean_abs_shap = np.mean(np.abs(shapley_values), axis=0)
-    importance_df = pd.DataFrame({
-        'factor': factor_names,
-        'mean_abs_shap': mean_abs_shap,
-        'normalized_importance': mean_abs_shap / mean_abs_shap.sum()
-    }).sort_values('mean_abs_shap', ascending=False)
-    
-    print("\n=== 因子重要性（基于 InstaSHAP） ===")
-    print(importance_df)
-    
-    # 6. 可视化形状函数（f_T）
-    shape_functions = model.get_shape_functions()
-    top_factors = importance_df['factor'].head(4).tolist()
-    
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    axes = axes.flatten()
-    
-    for idx, factor_name in enumerate(top_factors):
-        factor_idx = factor_names.index(factor_name)
-        # 获取该因子的形状函数
-        key = f"f_{factor_idx}"  # 主效应
-        if key in shape_functions:
-            x_vals = np.linspace(np.percentile(X_clean[:, factor_idx], 1),
-                                np.percentile(X_clean[:, factor_idx], 99), 100)
-            y_vals = shape_functions[key](x_vals.reshape(-1, 1))
-            axes[idx].plot(x_vals, y_vals)
-            axes[idx].set_title(f"{factor_name} 的形状函数 (f_{factor_idx})")
-            axes[idx].axhline(y=0, color='gray', linestyle='--', alpha=0.5)
-            axes[idx].set_xlabel("因子值")
-            axes[idx].set_ylabel("贡献")
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'InstaSHAP_形状函数.png'), dpi=150, bbox_inches='tight')
-    plt.close()
-    
-    return model, trainer, importance_df, history
-
-
-# ==================== InstaSHAP 多因子组合模型 ====================
-# 仅在多因子列表（公式个数 > 1）时执行
-if isinstance(formula, list) and len(formula) > 1 and USE_INSTASHAP:
-    print("\n" + "="*60)
-    print("开始 InstaSHAP 多因子组合模型训练与评估")
-    print("="*60)
-
-    # ---------- 1. 获取已计算好的因子数组 ----------
-    factor_list_train = factors["factor"]      # list of (T_train, N) arrays
-    factor_list_test  = factors["factor_test"] # list of (T_test, N) arrays
-    factor_list_now   = factors["factor_now"]  # list of (T_now, N) arrays
-    K = len(factor_list_train)                 # 因子个数
-    factor_names = [f"F{i+1}" for i in range(K)]
-
-    print(f"\n共 {K} 个因子参与 InstaSHAP 分析")
-
-    # ---------- 2. 训练并评估 InstaSHAP ----------
-    if len(factor_list_train) > 0:
-        model, trainer, importance_df, history = integrate_instashap_to_factor_analysis(
-            factor_list=factor_list_train,
-            factor_names=factor_names,
-            y=y,
-            y_test=y_test,
-            y_now=y_now,
-            pivoted=pivoted
+        al_train = alphalens.utils.get_clean_factor_and_forward_returns(
+            factor=factor_train_al,
+            prices=prices_train_al,
+            quantiles=QUANTILES,
+            periods=PERIODS,
+            max_loss=0.35,
         )
-        
-        # 保存模型
-        torch.save(model.state_dict(), os.path.join(output_dir, "instashap_model.pth"))
-        print(f"InstaSHAP 模型已保存至 {output_dir}/instashap_model.pth")
+        print(al_train.head())
+    except Exception as e:
+        print(f"Alphalens 数据准备失败: {e}")
+else:
+    print("USE_ALPHALENS=False，默认跳过 Alphalens 数据准备。对于15分钟数据，建议先使用上面的自定义 IC / 分层分析结果。")
 
 
-    # ========== InstaSHAP 扩展可视化 ==========
-    # ---------- 1. 因子重要性条形图（基于平均绝对 SHAP 值） ----------
-    plt.figure(figsize=(10, 6))
-    factors = importance_df['factor'].values
-    imp_values = importance_df['mean_abs_shap'].values
-    sorted_idx = np.argsort(imp_values)[::-1]
-    plt.barh(range(len(factors)), imp_values[sorted_idx], color='steelblue')
-    plt.yticks(range(len(factors)), factors[sorted_idx])
-    plt.xlabel('平均 |SHAP 值|')
-    plt.title('InstaSHAP 因子重要性条形图')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'InstaSHAP_因子重要性.png'), dpi=150)
-    plt.close()
-
-    # ---------- 2. 二阶交互效应热力图 ----------
-    # 提取所有二阶交互项的平均绝对贡献 |φ_{i,j}|
-    # InstaSHAPGAM 模型中，每个二阶交互项对应一个 subnet，key 为 "i_j"
-    n_feat = model.n_features
-    interaction_matrix = np.zeros((n_feat, n_feat))
-    
-    # 获取所有样本的 X_clean (训练时用的数据)
-    # 重新整理训练数据用于计算交互贡献
-    T, N = y.shape
-    M = len(factor_list_train)
-    X_flat = np.column_stack([f.flatten() for f in factor_list_train])
-    y_flat = y.flatten()
-    valid_mask = ~(np.isnan(X_flat).any(axis=1) | np.isnan(y_flat))
-    X_clean = X_flat[valid_mask]
-    
-    model.eval()
-    with torch.no_grad():
-        x_tensor = torch.tensor(X_clean, dtype=torch.float32, device=trainer.device)
-        # 计算每个二阶交互项的贡献值
-        for T_subset in model.interaction_sets:
-            if len(T_subset) == 2:
-                i, j = T_subset
-                key = model._subset_to_key(T_subset)
-                subnet = model.subnets[key]
-                x_T = x_tensor[:, list(T_subset)]
-                phi_T = subnet(x_T).squeeze().cpu().numpy()
-                mean_abs_contrib = np.mean(np.abs(phi_T))
-                interaction_matrix[i, j] = mean_abs_contrib
-                interaction_matrix[j, i] = mean_abs_contrib  # 对称
-    
-    # 绘制热力图
-    plt.figure(figsize=(10, 8))
-    im = plt.imshow(interaction_matrix, cmap='Reds', aspect='auto')
-    plt.colorbar(im, label='平均 |φ_{i,j}|')
-    plt.xticks(range(n_feat), factor_names, rotation=45, ha='right')
-    plt.yticks(range(n_feat), factor_names)
-    plt.title('InstaSHAP 二阶交互效应强度热力图')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'InstaSHAP_交互效应热力图.png'), dpi=150)
-    plt.close()
-
-    # ---------- 3. SHAP 值蜂群图（beeswarm） ----------
-    # 使用 matplotlib 手动实现简化蜂群图（随机抖动 + 按特征分组）
-    shapley_all = trainer.explain(X_clean)  # (n_samples, n_feat)
-    # 将数据转换为长格式用于绘图
-    n_samples_display = min(2000, shapley_all.shape[0])  # 限制样本数避免过密
-    sample_idx = np.random.choice(shapley_all.shape[0], n_samples_display, replace=False)
-    shap_sample = shapley_all[sample_idx, :]
-    
-    plt.figure(figsize=(12, 7))
-    # 按特征重要性排序显示
-    order = np.argsort(np.mean(np.abs(shap_sample), axis=0))[::-1]
-    positions = []
-    labels = []
-    for i, feat_idx in enumerate(order):
-        values = shap_sample[:, feat_idx]
-        # 添加随机垂直抖动（正态分布，标准差 0.08）
-        jitter = np.random.normal(0, 0.08, size=len(values))
-        y_pos = np.ones_like(values) * i + jitter
-        # 根据 SHAP 值正负着色
-        colors = ['red' if v > 0 else 'blue' for v in values]
-        plt.scatter(values, y_pos, c=colors, alpha=0.6, s=10, edgecolors='none')
-        positions.append(i)
-        labels.append(factor_names[feat_idx])
-    
-    plt.yticks(positions, labels)
-    plt.axvline(x=0, color='black', linestyle='-', linewidth=0.8)
-    plt.xlabel('SHAP 值（对预测的贡献）')
-    plt.title('InstaSHAP 因子贡献蜂群图（红色=正向，蓝色=负向）')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'InstaSHAP_蜂群图.png'), dpi=150)
-    plt.close()
-
-    # ---------- 4. 交互网络图（基于二阶交互强度） ----------
+# ## 可选：使用 Alphalens 生成分析图
+if USE_ALPHALENS:
     try:
-        import networkx as nx
-        # 构建网络
-        G = nx.Graph()
-        # 添加节点
-        for i, name in enumerate(factor_names):
-            G.add_node(name, size=np.mean(np.abs(shapley_all[:, i])))
-        # 添加边（二阶交互强度大于阈值）
-        threshold = np.percentile(interaction_matrix[interaction_matrix > 0], 70) if np.any(interaction_matrix > 0) else 0.01
-        for i in range(n_feat):
-            for j in range(i+1, n_feat):
-                weight = interaction_matrix[i, j]
-                if weight > threshold:
-                    G.add_edge(factor_names[i], factor_names[j], weight=weight)
-        
-        plt.figure(figsize=(12, 10))
-        pos = nx.spring_layout(G, seed=42, k=2, iterations=50)
-        # 节点大小正比于平均绝对 SHAP
-        node_sizes = [G.nodes[n]['size'] * 500 for n in G.nodes]
-        nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color='lightblue', edgecolors='black')
-        nx.draw_networkx_labels(G, pos, font_size=10)
-        # 边宽正比于交互强度
-        edges = G.edges(data=True)
-        widths = [d['weight'] * 3 for (_, _, d) in edges]
-        nx.draw_networkx_edges(G, pos, width=widths, alpha=0.6, edge_color='gray')
-        plt.title('因子交互网络图（节点大小=重要性，边宽=二阶交互强度）')
-        plt.axis('off')
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'InstaSHAP_交互网络图.png'), dpi=150)
-        plt.close()
-    except ImportError:
-        print("警告：未安装 networkx 库，跳过交互网络图。")
+        alphalens.tears.create_returns_tear_sheet(al_train)
+        alphalens.tears.create_information_tear_sheet(al_train)
+    except Exception as e:
+        print(f"Alphalens 分析失败: {e}")
+else:
+    print("已跳过 Alphalens tear sheet。若切换到日频数据，可将 USE_ALPHALENS 改为 True 再运行。")
 
-    print("InstaSHAP 扩展可视化完成。")
-
-    print("\nInstaSHAP 多因子组合模型分析完成。")
-
-if __name__ == "__main__":
-    try:
-        build_real_data_visualizations()
-    except Exception as exc:
-        print(f"真实数据可视化失败: {exc}")
