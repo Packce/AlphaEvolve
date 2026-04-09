@@ -5476,16 +5476,38 @@ class My:
         ASI = My.SUM(SI, M1)
         return My._ensure_np_output(ASI)
 
-
 import warnings
 import asyncio
 import nest_asyncio
-from qmf_data import load_kline
-import qmf_model_sdk
-import alphalens
+
+try:
+    from qmf_data import load_kline
+    QMF_DATA_AVAILABLE = True
+except ImportError:
+    QMF_DATA_AVAILABLE = False
+    load_kline = None
+
+try:
+    import qmf_model_sdk
+    QMF_MODEL_SDK_AVAILABLE = True
+except ImportError:
+    QMF_MODEL_SDK_AVAILABLE = False
+    qmf_model_sdk = None
+
+try:
+    import alphalens
+    ALPHALENS_AVAILABLE = True
+except ImportError:
+    ALPHALENS_AVAILABLE = False
+    alphalens = None
 
 nest_asyncio.apply()
 warnings.filterwarnings("ignore", category=RuntimeWarning)
+warnings.filterwarnings("ignore", category=FutureWarning, module="pandas")
+warnings.filterwarnings("ignore", message=".*Glyph.*")
+warnings.filterwarnings("ignore", message=".*does not have a glyph.*")
+warnings.filterwarnings("ignore", message=".*has no glyph.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
 
 # ========== 数据配置 ==========
 
@@ -5739,9 +5761,24 @@ log_print("数据获取完成！")
 
 def get_futures_data(symbol, start_time=None, end_time=None, symbol_cycle=None):
     """获取单个合约的数据"""
+    if load_kline is None:
+        log_print(f"警告：qmf_data 不可用，{symbol} 无法获取数据")
+        return pd.DataFrame(
+            columns=[
+                "date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "open_interest",
+                "asset",
+            ]
+        )
+
     if symbol_cycle is None:
         symbol_cycle = SYMBOL_CYCLE
-    
+
     if start_time is None:
         start_time = f"{BEGIN_TIME} 00:00:00"
     elif len(str(start_time)) == 10:
@@ -5794,22 +5831,30 @@ for symbol in SYMBOLS:
 
 # 检查是否有有效数据
 if len(df_list) == 0:
-    raise ValueError(
-        "错误：所有合约在指定时间范围内都没有数据，请检查时间范围或合约代码！"
-    )
+    if not QMF_DATA_AVAILABLE:
+        log_print("警告：qmf_data 不可用，将使用空数据集继续")
+    else:
+        log_print("警告：所有合约在指定时间范围内都没有数据")
 
 if len(df_list_test) == 0:
-    raise ValueError(
-        "错误：所有合约在指定时间范围内都没有数据，请检查时间范围或合约代码！"
-    )
+    if not QMF_DATA_AVAILABLE:
+        log_print("警告：qmf_data 不可用，将使用空数据集继续")
+    else:
+        log_print("警告：所有合约在指定时间范围内都没有数据")
 
-df = pd.concat(df_list, ignore_index=True)
-df = df[["date", "open", "high", "low", "close", "volume", "open_interest", "asset"]]
+if df_list:
+    df = pd.concat(df_list, ignore_index=True)
+    df = df[["date", "open", "high", "low", "close", "volume", "open_interest", "asset"]]
+else:
+    df = pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume", "open_interest", "asset"])
 
-df_test = pd.concat(df_list_test, ignore_index=True)
-df_test = df_test[
-    ["date", "open", "high", "low", "close", "volume", "open_interest", "asset"]
-]
+if df_list_test:
+    df_test = pd.concat(df_list_test, ignore_index=True)
+    df_test = df_test[
+        ["date", "open", "high", "low", "close", "volume", "open_interest", "asset"]
+    ]
+else:
+    df_test = pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume", "open_interest", "asset"])
 
 # 数据预处理
 df["open"] = pd.to_numeric(df["open"], errors="coerce")

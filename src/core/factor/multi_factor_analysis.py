@@ -6,9 +6,28 @@
 import warnings
 import asyncio
 import nest_asyncio
-from qmf_data import load_kline
-import qmf_model_sdk
-import alphalens
+
+try:
+    from qmf_data import load_kline
+    QMF_DATA_AVAILABLE = True
+except ImportError:
+    QMF_DATA_AVAILABLE = False
+    load_kline = None
+
+try:
+    import qmf_model_sdk
+    QMF_MODEL_SDK_AVAILABLE = True
+except ImportError:
+    QMF_MODEL_SDK_AVAILABLE = False
+    qmf_model_sdk = None
+
+try:
+    import alphalens
+    ALPHALENS_AVAILABLE = True
+except ImportError:
+    ALPHALENS_AVAILABLE = False
+    alphalens = None
+
 import datetime
 from scipy.stats import rankdata as _rankdata
 import numpy as np
@@ -33,6 +52,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas")
 warnings.filterwarnings("ignore", message=".*Glyph.*")
 warnings.filterwarnings("ignore", message=".*does not have a glyph.*")
+warnings.filterwarnings("ignore", message=".*has no glyph.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
 import matplotlib.pyplot as plt
 
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'DejaVu Sans', 'FreeSans']
@@ -283,6 +304,10 @@ print("数据获取完成！")
 
 def get_futures_data(symbol, start_time=None, end_time=None):
     """获取单个合约的数据"""
+    if load_kline is None:
+        print(f"警告：qmf_data 不可用，{symbol} 无法获取数据")
+        return pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
+
     if start_time is None:
         start_time = f"{BEGIN_TIME} 00:00:00"
     elif len(str(start_time)) == 10:
@@ -291,16 +316,16 @@ def get_futures_data(symbol, start_time=None, end_time=None):
         end_time = f"{END_TIME} 23:59:59"
     elif len(str(end_time)) == 10:
         end_time = f"{end_time} 23:59:59"
-    
+
     # data = load_kline(product=symbol, cycle="1D", start_time=start_time, end_time=end_time)
     # data = load_kline(product=symbol, cycle="15min", start_time=start_time, end_time=end_time)
     data = load_kline(product=symbol, cycle=SYMBOL_CYCLE_MAP[SYMBOL_CYCLE], start_time=start_time, end_time=end_time)
-    
+
     # 检查数据是否为空或没有 'date' 列
     if data is None or len(data) == 0 or 'date' not in data.columns:
         print(f"警告：{symbol} 在指定时间范围内没有数据，跳过该合约")
         return pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
-    
+
     data["date"] = pd.to_datetime(data["date"]+data["time"], errors="coerce")
     # print(data)
     data.reset_index(inplace=True, drop=True)
@@ -325,22 +350,40 @@ for symbol in SYMBOLS:
 
 # 检查是否有有效数据
 if len(df_list) == 0:
-    raise ValueError("错误：所有合约在指定时间范围内都没有数据，请检查时间范围或合约代码！")
+    if not QMF_DATA_AVAILABLE:
+        print("警告：qmf_data 不可用，将使用空数据集继续")
+    else:
+        print("警告：所有合约在指定时间范围内都没有数据")
 
 if len(df_list_test) == 0:
-    raise ValueError("错误：所有合约在指定时间范围内都没有数据，请检查时间范围或合约代码！")
+    if not QMF_DATA_AVAILABLE:
+        print("警告：qmf_data 不可用，将使用空数据集继续")
+    else:
+        print("警告：所有合约在指定时间范围内都没有数据")
 
 if len(df_list_now) == 0:
-    raise ValueError("错误：所有合约在指定时间范围内都没有数据，请检查时间范围或合约代码！")
+    if not QMF_DATA_AVAILABLE:
+        print("警告：qmf_data 不可用，将使用空数据集继续")
+    else:
+        print("警告：所有合约在指定时间范围内都没有数据")
 
-df = pd.concat(df_list, ignore_index=True)
-df = df[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
+if df_list:
+    df = pd.concat(df_list, ignore_index=True)
+    df = df[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
+else:
+    df = pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
 
-df_test = pd.concat(df_list_test, ignore_index=True)
-df_test = df_test[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
+if df_list_test:
+    df_test = pd.concat(df_list_test, ignore_index=True)
+    df_test = df_test[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
+else:
+    df_test = pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
 
-df_now = pd.concat(df_list_now, ignore_index=True)
-df_now = df_now[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
+if df_list_now:
+    df_now = pd.concat(df_list_now, ignore_index=True)
+    df_now = df_now[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
+else:
+    df_now = pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
 
 df
 

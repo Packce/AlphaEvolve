@@ -15,8 +15,12 @@ from datetime import datetime
 import threading
 import warnings
 warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore', category=UserWarning, module="matplotlib")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core", "factor"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core", "genetic"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 
 SINGLE_FACTOR_AVAILABLE = None
 MULTI_FACTOR_AVAILABLE = None
@@ -25,15 +29,27 @@ MINING_AVAILABLE = None
 def check_dependencies():
     global SINGLE_FACTOR_AVAILABLE, MULTI_FACTOR_AVAILABLE, MINING_AVAILABLE
     import importlib.util
-    
+
     def module_exists(module_name):
         spec = importlib.util.find_spec(module_name)
-        return spec is not None
-    
+        if spec is not None:
+            return True
+        local_paths = [
+            "src/core/factor",
+            "src/core/genetic",
+            os.path.join(os.path.dirname(__file__), "..", "core", "factor"),
+            os.path.join(os.path.dirname(__file__), "..", "core", "genetic"),
+        ]
+        for path in local_paths:
+            full_path = os.path.join(path, f"{module_name}.py")
+            if os.path.exists(full_path):
+                return True
+        return False
+
     SINGLE_FACTOR_AVAILABLE = module_exists("single_factor_analysis")
     MULTI_FACTOR_AVAILABLE = module_exists("multi_factor_analysis")
     MINING_AVAILABLE = module_exists("factor_mining")
-    
+
     if not SINGLE_FACTOR_AVAILABLE:
         print(f"警告: single_factor_analysis 模块未安装")
     if not MULTI_FACTOR_AVAILABLE:
