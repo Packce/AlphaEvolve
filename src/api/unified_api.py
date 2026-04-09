@@ -201,9 +201,9 @@ def run_single_factor_task(task_id: str, params: SingleFactorParams):
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        
+
         use_mock = params.use_mock_data if hasattr(params, 'use_mock_data') else False
-        
+
         if not use_mock:
             try:
                 import single_factor_analysis as sfa
@@ -212,23 +212,26 @@ def run_single_factor_task(task_id: str, params: SingleFactorParams):
                     get_futures_data as sfa_get_data,
                     futuers_sectors as SFA_FUTURES_SECTORS,
                 )
-                
+
+                if not getattr(sfa, 'QMF_DATA_AVAILABLE', True):
+                    raise ValueError("qmf_data 不可用")
+
                 if params.symbols:
                     SYMBOLS = params.symbols
                 else:
                     SYMBOLS = sfa_get_symbols(params.selected_sector, SFA_FUTURES_SECTORS, None)
-                
+
                 features = ["open", "close", "high", "low", "volume", "open_interest"]
-                
+
                 df_list = []
                 for symbol in SYMBOLS:
                     data = sfa_get_data(symbol, params.begin_time, params.end_time, params.symbol_cycle)
                     if len(data) > 0:
                         df_list.append(data)
-                
+
                 if len(df_list) == 0:
                     raise ValueError("训练集没有有效数据")
-                
+
                 df = pd.concat(df_list, ignore_index=True)
                 
                 df_list_test = []
@@ -646,27 +649,31 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        
+
         use_mock = not MULTI_FACTOR_AVAILABLE
-        
+
+        if not use_mock:
+            import multi_factor_analysis as mfa
+            if not getattr(mfa, 'QMF_DATA_AVAILABLE', True):
+                use_mock = True
+                print("警告: qmf_data 不可用，自动切换到 Mock 模式")
+
         if use_mock:
-            print("警告: multi_factor_analysis 模块不可用，使用模拟数据进行演示")
+            print("使用模拟数据进行演示")
             SYMBOLS = params.symbols if params.symbols else ["au888", "ag888", "cu888"]
             features = ['open', 'close', 'high', 'low', 'volume', 'open_interest']
-            
+
             df_list, _ = generate_mock_df_list(SYMBOLS, n_timepoints=500, start_date=params.begin_time)
             df_list_test, _ = generate_mock_df_list(SYMBOLS, n_timepoints=200, start_date=params.begin_time_test)
             df_list_now, _ = generate_mock_df_list(SYMBOLS, n_timepoints=100, start_date=params.begin_time_now or "2026-01-01")
-            
+
             df = pd.concat(df_list, ignore_index=True)
             df_test = pd.concat(df_list_test, ignore_index=True)
             df_now = pd.concat(df_list_now, ignore_index=True) if df_list_now else pd.DataFrame()
-            
+
             target = 'future_return'
             formulas = params.formula if isinstance(params.formula, list) else [params.formula]
         else:
-            import multi_factor_analysis as mfa
-            
             mfa.SELECTED_SECTOR = params.selected_sector
             mfa.MANUAL_SYMBOLS = params.symbols if params.symbols else ["au888", "ag888"]
             mfa.BEGIN_TIME = params.begin_time
@@ -1332,15 +1339,19 @@ def run_mining_task(task_id: str, params: MiningParams):
             get_symbols_by_sector as fm_get_symbols,
             FUTURES_SECTORS as FM_FUTURES_SECTORS,
         )
-        
+
         update_task(task_id, status="running", message="正在初始化数据...")
-        
+
         is_mock_mode = params.use_mock_data or not MINING_AVAILABLE
-        
+
+        if not is_mock_mode and not getattr(fm, 'QMF_DATA_AVAILABLE', True):
+            is_mock_mode = True
+            print("警告: qmf_data 不可用，自动切换到 Mock 模式")
+
         if is_mock_mode:
             symbols = params.symbols if params.symbols else ["au888", "ag888", "cu888"]
             features = params.features
-            
+
             update_task(task_id, message="正在生成模拟数据...")
             X_dict, y = generate_mock_data(symbols, features, n_timepoints=500)
             X_dict_test, y_test = generate_mock_data(symbols, features, n_timepoints=200)
