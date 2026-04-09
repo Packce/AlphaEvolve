@@ -186,10 +186,62 @@ def run_single_factor_task(task_id: str, params: SingleFactorParams):
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         
-        use_mock = not SINGLE_FACTOR_AVAILABLE
+        use_mock = params.use_mock_data if hasattr(params, 'use_mock_data') else False
+        
+        if not use_mock:
+            try:
+                import single_factor_analysis as sfa
+                from single_factor_analysis import (
+                    get_symbols_by_sector as sfa_get_symbols,
+                    get_futures_data as sfa_get_data,
+                    futuers_sectors as SFA_FUTURES_SECTORS,
+                )
+                
+                if params.symbols:
+                    SYMBOLS = params.symbols
+                else:
+                    SYMBOLS = sfa_get_symbols(params.selected_sector, SFA_FUTURES_SECTORS, None)
+                
+                features = ["open", "close", "high", "low", "volume", "open_interest"]
+                
+                df_list = []
+                for symbol in SYMBOLS:
+                    data = sfa_get_data(symbol, params.begin_time, params.end_time, params.symbol_cycle)
+                    if len(data) > 0:
+                        df_list.append(data)
+                
+                if len(df_list) == 0:
+                    raise ValueError("训练集没有有效数据")
+                
+                df = pd.concat(df_list, ignore_index=True)
+                
+                df_list_test = []
+                for symbol in SYMBOLS:
+                    data = sfa_get_data(symbol, params.begin_time_test, params.end_time_test, params.symbol_cycle)
+                    if len(data) > 0:
+                        df_list_test.append(data)
+                
+                if len(df_list_test) == 0:
+                    raise ValueError("测试集没有有效数据")
+                
+                df_test = pd.concat(df_list_test, ignore_index=True)
+                
+                df_list_now = []
+                if params.begin_time_now:
+                    for symbol in SYMBOLS:
+                        data = sfa_get_data(symbol, params.begin_time_now, None, params.symbol_cycle)
+                        if len(data) > 0:
+                            df_list_now.append(data)
+                
+                df_now = pd.concat(df_list_now, ignore_index=True) if df_list_now else pd.DataFrame()
+                use_mock = False
+            except Exception as e:
+                print(f"警告: 无法导入单因子分析模块或获取数据: {e}")
+                print("自动切换到 Mock 模式进行演示")
+                use_mock = True
         
         if use_mock:
-            print("警告: single_factor_analysis 模块不可用，使用模拟数据进行演示")
+            print("使用模拟数据进行演示")
             SYMBOLS = params.symbols if params.symbols else ["au888", "ag888", "cu888"]
             features = ["open", "close", "high", "low", "volume", "open_interest"]
             
@@ -199,51 +251,6 @@ def run_single_factor_task(task_id: str, params: SingleFactorParams):
             
             df = pd.concat(df_list, ignore_index=True)
             df_test = pd.concat(df_list_test, ignore_index=True)
-            df_now = pd.concat(df_list_now, ignore_index=True) if df_list_now else pd.DataFrame()
-        else:
-            import single_factor_analysis as sfa
-            from single_factor_analysis import (
-                get_symbols_by_sector as sfa_get_symbols,
-                get_futures_data as sfa_get_data,
-                futuers_sectors as SFA_FUTURES_SECTORS,
-            )
-            
-            if params.symbols:
-                SYMBOLS = params.symbols
-            else:
-                SYMBOLS = sfa_get_symbols(params.selected_sector, SFA_FUTURES_SECTORS, None)
-            
-            features = ["open", "close", "high", "low", "volume", "open_interest"]
-            
-            df_list = []
-            for symbol in SYMBOLS:
-                data = sfa_get_data(symbol, params.begin_time, params.end_time, params.symbol_cycle)
-                if len(data) > 0:
-                    df_list.append(data)
-            
-            if len(df_list) == 0:
-                raise ValueError("训练集没有有效数据")
-            
-            df = pd.concat(df_list, ignore_index=True)
-            
-            df_list_test = []
-            for symbol in SYMBOLS:
-                data = sfa_get_data(symbol, params.begin_time_test, params.end_time_test, params.symbol_cycle)
-                if len(data) > 0:
-                    df_list_test.append(data)
-            
-            if len(df_list_test) == 0:
-                raise ValueError("测试集没有有效数据")
-            
-            df_test = pd.concat(df_list_test, ignore_index=True)
-            
-            df_list_now = []
-            if params.begin_time_now:
-                for symbol in SYMBOLS:
-                    data = sfa_get_data(symbol, params.begin_time_now, None, params.symbol_cycle)
-                    if len(data) > 0:
-                        df_list_now.append(data)
-            
             df_now = pd.concat(df_list_now, ignore_index=True) if df_list_now else pd.DataFrame()
         
         start_time = time.time()
@@ -412,12 +419,6 @@ def run_single_factor_task(task_id: str, params: SingleFactorParams):
             ic_train = sfa.calc_ic_stats(factor, y)
             ic_test = sfa.calc_ic_stats(factor_test, y_test) if analysis_test is not None else None
             ic_now = sfa.calc_ic_stats(factor_now, y_now) if analysis_now is not None else None
-        
-        update_task(task_id, message="正在计算IC统计...", progress=70)
-        
-        ic_train = sfa.calc_ic_stats(factor, y)
-        ic_test = sfa.calc_ic_stats(factor_test, y_test) if analysis_test is not None else None
-        ic_now = sfa.calc_ic_stats(factor_now, y_now) if analysis_now is not None else None
         
         summary_data = []
         if ic_train is not None:
