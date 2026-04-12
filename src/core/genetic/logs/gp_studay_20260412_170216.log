@@ -1,0 +1,31 @@
+2026-04-12 17:02:18,047 [INFO] 当前使用的合约列表（共 9 个合约）：
+2026-04-12 17:02:18,047 [INFO] ['ao888', 'ni888', 'pb888', 'sn888', 'ss888', 'zn888', 'al888', 'cu888', 'bc888']
+2026-04-12 17:02:18,047 [INFO] 开始获取数据...
+2026-04-12 17:02:18,047 [INFO] 数据获取完成！
+2026-04-12 17:02:18,047 [INFO] ====================================================================================================
+2026-04-12 17:02:18,047 [INFO] 本地脚本模式：因子挖掘启动
+2026-04-12 17:02:18,047 [INFO] ====================================================================================================
+2026-04-12 17:02:18,048 [INFO] 本次合约数量: 9
+2026-04-12 17:02:18,048 [INFO] ['ao888', 'ni888', 'pb888', 'sn888', 'ss888', 'zn888', 'al888', 'cu888', 'bc888']
+2026-04-12 17:02:18,048 [INFO] 训练区间: 2025-06-01 ~ 2025-08-31 | 测试区间: 2025-09-01 ~ 2025-12-31 | 周期: 15分钟
+2026-04-12 17:02:18,048 [INFO] [Mining][get_futures_data] symbol=ao888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,075 [INFO] [Mining][get_futures_data] symbol=ni888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,097 [INFO] [Mining][get_futures_data] symbol=pb888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,120 [INFO] [Mining][get_futures_data] symbol=sn888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,143 [INFO] [Mining][get_futures_data] symbol=ss888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,175 [INFO] [Mining][get_futures_data] symbol=zn888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,207 [INFO] [Mining][get_futures_data] symbol=al888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,229 [INFO] [Mining][get_futures_data] symbol=cu888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,251 [INFO] [Mining][get_futures_data] symbol=bc888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,322 [INFO] [Mining][get_futures_data] symbol=ao888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,341 [INFO] [Mining][get_futures_data] symbol=ni888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,361 [INFO] [Mining][get_futures_data] symbol=pb888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,381 [INFO] [Mining][get_futures_data] symbol=sn888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,401 [INFO] [Mining][get_futures_data] symbol=ss888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,420 [INFO] [Mining][get_futures_data] symbol=zn888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,441 [INFO] [Mining][get_futures_data] symbol=al888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,461 [INFO] [Mining][get_futures_data] symbol=cu888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,481 [INFO] [Mining][get_futures_data] symbol=bc888 symbol_cycle='15分钟' normalized_cycle='15分钟' mapped_cycle='15min' used_default_cycle=False
+2026-04-12 17:02:18,578 [INFO] 训练集面板形状(close): (1983, 9)
+2026-04-12 17:02:18,578 [INFO] 测试集面板形状(close): (2489, 9)
+2026-04-12 17:02:18,578 [INFO] 本次使用的随机数种子为: 1161096875

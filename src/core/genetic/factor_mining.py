@@ -29,6 +29,8 @@ from datetime import datetime
 from typing import List, Dict, Any, Callable, Optional, Union
 from scipy.stats import rankdata as _rankdata
 
+RUN_AS_SCRIPT = __name__ == "__main__"
+
 try:
     import cupy as cp
     import cudf
@@ -5708,10 +5710,13 @@ def get_symbols_by_sector(selected, sector_map, manual_symbols):
     return manual_symbols
 
 
-SYMBOLS = get_symbols_by_sector(SELECTED_SECTOR, FUTURES_SECTORS, MANUAL_SYMBOLS)
-
-log_print(f"当前使用的合约列表（共 {len(SYMBOLS)} 个合约）：")
-log_print(SYMBOLS)
+if RUN_AS_SCRIPT:
+    SYMBOLS = get_symbols_by_sector(SELECTED_SECTOR, FUTURES_SECTORS, MANUAL_SYMBOLS)
+    log_print(f"当前使用的合约列表（共 {len(SYMBOLS)} 个合约）：")
+    log_print(SYMBOLS)
+else:
+    # Importing this module from API should not trigger script-style bootstrap data loading.
+    SYMBOLS = []
 
 IC_PERIOD = 1  # （默认 5）
 IC_QUANTILES = 5  # （默认 5）
@@ -5732,8 +5737,8 @@ END_TIME = "2025-08-31"
 BEGIN_TIME_TEST = "2025-09-01"
 END_TIME_TEST = "2025-12-31"
 # 数据周期
-SYMBOL_CYCLE = "15分钟"  # 例如："1天", "1小时"等
-# SYMBOL_CYCLE = "1天"  # 例如："1天", "1小时"等
+# SYMBOL_CYCLE = "15分钟"  # 例如："1天", "1小时"等
+SYMBOL_CYCLE = "1天"  # 例如："1天", "1小时"等
 
 SYMBOL_CYCLE_MAP = {
     "1分钟": "1min",
@@ -5749,35 +5754,47 @@ SYMBOL_CYCLE_MAP = {
 }
 
 # 获取所有合约的数据，获取后将这部分注释掉，已注释
-log_print("开始获取数据...")
+if RUN_AS_SCRIPT:
+    log_print("开始获取数据...")
 # for symbol in SYMBOLS:
 #     log_print(f"训练集：正在获取 {symbol} 的数据...")
 #     asyncio.run(qmf_model_sdk.get_futures_data(symbol, BEGIN_TIME, END_TIME, SYMBOL_CYCLE))
 # for symbol in SYMBOLS:
 #     log_print(f"测试集：正在获取 {symbol} 的数据...")
 #     asyncio.run(qmf_model_sdk.get_futures_data(symbol, BEGIN_TIME_TEST, END_TIME_TEST, SYMBOL_CYCLE))
-log_print("数据获取完成！")
+if RUN_AS_SCRIPT:
+    log_print("数据获取完成！")
 
 
 def get_futures_data(symbol, start_time=None, end_time=None, symbol_cycle=None):
     """获取单个合约的数据"""
+    empty_columns = [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "open_interest",
+        "asset",
+    ]
     if load_kline is None:
         log_print(f"警告：qmf_data 不可用，{symbol} 无法获取数据")
-        return pd.DataFrame(
-            columns=[
-                "date",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "open_interest",
-                "asset",
-            ]
-        )
+        return pd.DataFrame(columns=empty_columns)
 
-    if symbol_cycle is None:
-        symbol_cycle = SYMBOL_CYCLE
+    raw_symbol_cycle = symbol_cycle
+    cycle_name = str(symbol_cycle).strip() if symbol_cycle is not None else ""
+    used_default_cycle = False
+    if not cycle_name:
+        cycle_name = SYMBOL_CYCLE
+        used_default_cycle = True
+    elif cycle_name not in SYMBOL_CYCLE_MAP:
+        log_print(
+            f"警告：未知周期 {raw_symbol_cycle!r}，"
+            f"已回退到默认周期 {SYMBOL_CYCLE!r}"
+        )
+        cycle_name = SYMBOL_CYCLE
+        used_default_cycle = True
 
     if start_time is None:
         start_time = f"{BEGIN_TIME} 00:00:00"
@@ -5789,28 +5806,30 @@ def get_futures_data(symbol, start_time=None, end_time=None, symbol_cycle=None):
     elif len(str(end_time)) == 10:
         end_time = f"{end_time} 23:59:59"
 
-    data = load_kline(
-        product=symbol,
-        cycle=SYMBOL_CYCLE_MAP[symbol_cycle],
-        start_time=start_time,
-        end_time=end_time,
+    mapped_cycle = SYMBOL_CYCLE_MAP[cycle_name]
+    log_print(
+        f"[Mining][get_futures_data] symbol={symbol} "
+        f"symbol_cycle={raw_symbol_cycle!r} normalized_cycle={cycle_name!r} "
+        f"mapped_cycle={mapped_cycle!r} used_default_cycle={used_default_cycle}"
     )
+    try:
+        data = load_kline(
+            product=symbol,
+            cycle=mapped_cycle,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    except Exception as exc:
+        log_print(
+            f"警告：读取 {symbol} 行情失败，已跳过。"
+            f"cycle={mapped_cycle!r} start={start_time!r} end={end_time!r} err={exc}"
+        )
+        return pd.DataFrame(columns=empty_columns)
 
     # 检查数据是否为空或没有 'date' 列
     if data is None or len(data) == 0 or "date" not in data.columns:
         log_print(f"警告：{symbol} 在指定时间范围内没有数据，跳过该合约")
-        return pd.DataFrame(
-            columns=[
-                "date",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "open_interest",
-                "asset",
-            ]
-        )
+        return pd.DataFrame(columns=empty_columns)
 
     data["date"] = pd.to_datetime(data["date"] + data["time"], errors="coerce")
     data.reset_index(inplace=True, drop=True)
@@ -5818,222 +5837,16 @@ def get_futures_data(symbol, start_time=None, end_time=None, symbol_cycle=None):
     return data
 
 
-# 获取所有合约数据并合并
-df_list = []
-df_list_test = []
-for symbol in SYMBOLS:
-    data = get_futures_data(symbol)
-    if len(data) > 0:
-        df_list.append(data)
-    data_test = get_futures_data(symbol, BEGIN_TIME_TEST, END_TIME_TEST)
-    if len(data_test) > 0:
-        df_list_test.append(data_test)
-
-# 检查是否有有效数据
-if len(df_list) == 0:
-    if not QMF_DATA_AVAILABLE:
-        log_print("警告：qmf_data 不可用，将使用空数据集继续")
-    else:
-        log_print("警告：所有合约在指定时间范围内都没有数据")
-
-if len(df_list_test) == 0:
-    if not QMF_DATA_AVAILABLE:
-        log_print("警告：qmf_data 不可用，将使用空数据集继续")
-    else:
-        log_print("警告：所有合约在指定时间范围内都没有数据")
-
-if df_list:
-    df = pd.concat(df_list, ignore_index=True)
-    df = df[["date", "open", "high", "low", "close", "volume", "open_interest", "asset"]]
-else:
-    df = pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume", "open_interest", "asset"])
-
-if df_list_test:
-    df_test = pd.concat(df_list_test, ignore_index=True)
-    df_test = df_test[
-        ["date", "open", "high", "low", "close", "volume", "open_interest", "asset"]
-    ]
-else:
-    df_test = pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume", "open_interest", "asset"])
-
-# 数据预处理
-df["open"] = pd.to_numeric(df["open"], errors="coerce")
-df["high"] = pd.to_numeric(df["high"], errors="coerce")
-df["low"] = pd.to_numeric(df["low"], errors="coerce")
-df["close"] = pd.to_numeric(df["close"], errors="coerce")
-df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
-df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce")
-
-df_test["open"] = pd.to_numeric(df_test["open"], errors="coerce")
-df_test["high"] = pd.to_numeric(df_test["high"], errors="coerce")
-df_test["low"] = pd.to_numeric(df_test["low"], errors="coerce")
-df_test["close"] = pd.to_numeric(df_test["close"], errors="coerce")
-df_test["volume"] = pd.to_numeric(df_test["volume"], errors="coerce")
-df_test["open_interest"] = pd.to_numeric(df_test["open_interest"], errors="coerce")
-
-# 去重
-df.drop_duplicates(subset=["asset", "date"], keep="last", inplace=True)
-df.sort_values(["asset", "date"], ignore_index=True, inplace=True)
-
-df_test.drop_duplicates(subset=["asset", "date"], keep="last", inplace=True)
-df_test.sort_values(["asset", "date"], ignore_index=True, inplace=True)
-
-log_print(f"训练集数据预处理完成，共 {len(df)} 条记录")
-
-log_print(f"测试集数据预处理完成，共 {len(df_test)} 条记录")
-
-# 计算未来5天收益（目标变量）
-log_print("计算训练集目标变量...")
-df = df.sort_values(["asset", "date"]).reset_index(drop=True)
-df["future_return"] = df.groupby("asset")["close"].shift(-IC_PERIOD) / df["close"] - 1
-
-log_print("计算测试集目标变量...")
-df_test = df_test.sort_values(["asset", "date"]).reset_index(drop=True)
-df_test["future_return"] = (
-    df_test.groupby("asset")["close"].shift(-IC_PERIOD) / df_test["close"] - 1
-)
-
-# 删除目标变量为空的行
-df = df.dropna(subset=["future_return"]).reset_index(drop=True)
-df_test = df_test.dropna(subset=["future_return"]).reset_index(drop=True)
-
-# 将列名适配：date -> time, asset -> code
-df["time"] = df["date"]
-df["code"] = df["asset"]
-df_test["time"] = df_test["date"]
-df_test["code"] = df_test["asset"]
-
-# 选择特征和目标（只保留基础行情数据，技术指标在遗传编程中通过函数调用生成）
+# Module-level script bootstrap is intentionally disabled in API runtime.
+# Keep only lightweight placeholders needed by downstream helper functions.
 features = ["open", "close", "high", "low", "volume", "open_interest"]
-# features = []
 target = "future_return"
-
-# 数据预处理
-log_print(f"原始数据行数: {len(df)}")
-data = df[features + [target, "code", "time"]].copy()
-data_test = df_test[features + [target, "code", "time"]].copy()
-
-# 构造训练集X, y（T, N）格式，T为时间，N为合约数
-log_print("\n构造训练数据...")
-pivoted = {}
-all_cols = features + [target]
-unique_cols = list(dict.fromkeys(all_cols))
-if len(unique_cols) != len(all_cols):
-    dup_cols = [c for c in set(all_cols) if all_cols.count(c) > 1]
-    logger.info("发现重复列，已去重: %s", dup_cols)
-for col in unique_cols:
-    try:
-        pivoted[col] = data.pivot(index="time", columns="code", values=col)
-        log_print(f"特征 {col} 转换成功，形状: {pivoted[col].shape}")
-    except Exception as e:
-        log_print(f"特征 {col} 转换失败: {e}")
-        # 创建全零矩阵作为替代
-        unique_dates = pd.Series(data["time"]).unique()
-        unique_codes = pd.Series(data["code"]).unique()
-        pivoted[col] = pd.DataFrame(0, index=unique_dates, columns=unique_codes)
-
-# 构造测试集X, y（T, N）格式，T为时间，N为合约数
-log_print("\n构造测试数据...")
-pivoted_test = {}
-all_cols_test = features + [target]
-unique_cols_test = list(dict.fromkeys(all_cols_test))
-if len(unique_cols_test) != len(all_cols_test):
-    dup_cols_test = [c for c in set(all_cols_test) if all_cols_test.count(c) > 1]
-    logger.info("发现重复列，已去重: %s", dup_cols_test)
-for col in unique_cols_test:
-    try:
-        pivoted_test[col] = data_test.pivot(index="time", columns="code", values=col)
-        log_print(f"特征 {col} 转换成功，形状: {pivoted_test[col].shape}")
-    except Exception as e:
-        log_print(f"特征 {col} 转换失败: {e}")
-        # 创建全零矩阵作为替代
-        unique_dates_test = pd.Series(data_test["time"]).unique()
-        unique_codes_test = pd.Series(data_test["code"]).unique()
-        pivoted_test[col] = pd.DataFrame(
-            0, index=unique_dates_test, columns=unique_codes_test
-        )
-
-# 训练集
-X_dict = {f: pivoted[f].values for f in features}
-y = pivoted[target].values  # (T, N)
-log_print(f"\n训练数据准备完成:")
-log_print(f"时间点数量: {y.shape[0]}")
-log_print(f"合约数量: {y.shape[1]}")
-log_print(f"特征数量: {len(features)}")
-log_print(
-    f"特征列表: {features[:10]}..." if len(features) > 10 else f"特征列表: {features}"
-)
-# log_print(X_dict) 输出数据示例，已注释掉
-
-# 将X_dict整体保存为一个CSV文件，已注释掉
-# 合并为多层列索引的DataFrame，索引为时间，列为MultiIndex(特征, 合约)
-# multi_cols = pd.MultiIndex.from_product([features, pivoted[features[0]].columns], names=["feature", "code"])
-# X_df = pd.DataFrame(
-#     np.hstack([X_dict[f] for f in features]),
-#     index=pivoted[features[0]].index,
-#     columns=multi_cols
-# )
-# X_df.to_csv("train_X_dict_all.csv")
-# log_print("训练集X_dict已保存为 train_X_dict_all.csv。")
-
-# 测试集
-X_dict_test = {f: pivoted_test[f].values for f in features}
-y_test = pivoted_test[target].values  # (T, N)
-log_print(f"\n测试数据准备完成:")
-log_print(f"时间点数量: {y_test.shape[0]}")
-log_print(f"合约数量: {y_test.shape[1]}")
-log_print(f"特征数量: {len(features)}")
-log_print(
-    f"特征列表: {features[:10]}..." if len(features) > 10 else f"特征列表: {features}"
-)
-
-# 将X_dict_test整体保存为一个CSV文件
-# multi_cols_test = pd.MultiIndex.from_product([features, pivoted_test[features[0]].columns], names=["feature", "code"])
-# X_df_test = pd.DataFrame(
-#     np.hstack([X_dict_test[f] for f in features]),
-#     index=pivoted_test[features[0]].index,
-#     columns=multi_cols_test
-# )
-# X_df_test.to_csv("test_X_dict_all.csv")
-# log_print("测试集X_dict_test已保存为 test_X_dict_all.csv。")
-
-
-# 检查训练集数据质量
-log_print(f"\n数据质量检查:")
-log_print(f"y中NaN比例: {np.isnan(y).sum() / y.size:.2%}")
-log_print(f"y中有效值数量: {np.sum(~np.isnan(y))}")
-# 打印训练集最小时间和最大时间
-train_times = (
-    pivoted[features[0]].index if features and features[0] in pivoted else None
-)
-if train_times is not None and len(train_times) > 0:
-    log_print(f"训练集最小时间: {train_times.min()}, 最大时间: {train_times.max()}")
-
-for f in features[:5]:  # 只检查前5个特征
-    if f in X_dict:
-        nan_ratio = np.isnan(X_dict[f]).sum() / X_dict[f].size
-        log_print(f"  {f}: NaN比例={nan_ratio:.2%}")
-
-# 检查测试集数据质量
-log_print(f"\n测试集数据质量检查:")
-log_print(f"y_test中NaN比例: {np.isnan(y_test).sum() / y_test.size:.2%}")
-log_print(f"y_test中有效值数量: {np.sum(~np.isnan(y_test))}")
-# 打印测试集最小时间和最大时间
-test_times = (
-    pivoted_test[features[0]].index
-    if features and features[0] in pivoted_test
-    else None
-)
-if test_times is not None and len(test_times) > 0:
-    log_print(f"测试集最小时间: {test_times.min()}, 最大时间: {test_times.max()}")
-
-for f in features[:5]:  # 只检查前5个特征
-    if f in X_dict_test:
-        nan_ratio = np.isnan(X_dict_test[f]).sum() / X_dict_test[f].size
-        log_print(f"  {f}: NaN比例={nan_ratio:.2%}")
-
-X_TRAIN_SHAPE = X_dict["close"].shape
-X_TEST_SHAPE = X_dict_test["close"].shape
+X_dict = {f: np.empty((0, 0), dtype=np.float64) for f in features}
+X_dict_test = {f: np.empty((0, 0), dtype=np.float64) for f in features}
+y = np.empty((0, 0), dtype=np.float64)
+y_test = np.empty((0, 0), dtype=np.float64)
+X_TRAIN_SHAPE = (0, 0)
+X_TEST_SHAPE = (0, 0)
 
 
 def _trace_pred_all_nan_inf(prog, X_dict, function_set=None):
@@ -6462,109 +6275,74 @@ def fitness_func(
         return -np.inf
 
 
-# 优化后的遗传规划器配置
-gp = GeneticProgrammer(
-    generations=15,
-    population_size=120,
-    tournament_size=4,
-    n_components=5,
-    hall_of_fame=6,
-    function_set=FunctionSet(),
-    variable_names=features,
-    ts_window=20,
-    random_state=None,
-    const_range=(2, 120),
-    p_crossover=0.30,
-    p_subtree_mutation=0.30,
-    p_hoist_mutation=0.10,
-    p_point_mutation=0.20,
-    immigration_rate=0.20,
-    parsimony_coefficient=0.002,
-    init_depth=(3, 8),
-    suit_size=(4, 14),
-    stagnation_threshold=6,
-    min_improvement=0.001,
-    max_restarts=3,
-    max_program_size=24,
-    max_best_program_size=24,
-    ic_objective="max",
-    # 限制某些函数内某些参数是否允许为常数, True表示允许, False表示不允许, 列表表示允许的参数位置, 不填表示允许所有参数
-    allow_const_in_function={
-        # 基础数学运算（2个参数）
-        "ADD": [False, True],
-        "SUB": [False, True],
-        "MUL": [False, True],
-        "DIV": [False, True],
-        # 单元函数（1个参数）
-        "INV": [False],
-        "SIGNEDPOWER": [False],
-        'SIGMOID': [False],
-        # 新增算子函数（1个参数）
-        "ABS": [False],  # 绝对值
-        "LN": [False],  # 自然对数
-        "SQRT": [False],  # 平方根
-        "SIN": [False],  # 正弦
-        "COS": [False],  # 余弦
-        "TAN": [False],  # 正切
-        # 新增算子函数（2个参数）
-        "MAX": [False, False],  # 最大值
-        "MIN": [False, False],  # 最小值
-        "REF": [False, True],  # 引用
-        "DIFF": [False, True],  # 差分
-        "HHV": [False, True],  # 最高值
-        "HV": [False, True],  # 最高值（不包括当前K线）
-        "LLV": [False, True],  # 最低值
-        "LV": [False, True],  # 最低值（不包括当前K线）
-        "HHVBARS": [False, True],  # 最高值到当前周期数
-        "LLVBARS": [False, True],  # 最低值到当前周期数
-        "MA": [False, True],  # 简单移动平均
-        "EMA": [False, True],  # 指数移动平均
-        "SMA": [False, True, True],  # 中国式SMA（3个参数：x, d, m）
-        "WMA": [False, True],  # 加权移动平均
-        "DMA": [False, True],  # 动态移动平均
-        "AVEDEV": [False, True],  # 平均绝对偏差
-        "SLOPE": [False, True],  # 线性回归斜率
-        "FORCAST": [False, True],  # 线性回归预测值
-        "TOPRANGE": [False],  # 最高价周期数
-        "LOWRANGE": [False],  # 最低价周期数
-        # 时间序列函数（2个参数：数据+窗口）
-        "RANK": [False, True],
-        "SCALE": [False, True],
-        "TS_RANK": [False, True],
-        "TS_ZSCORE": [False, True],
-        # 双变量时间序列函数（3个参数：数据1+数据2+窗口）
-        "CORR": [False, False, True],
-        "COVA": [False, False, True],
-        "RANK_SUB": [False, False, True],
-        "RANK_DIV": [False, False, True],
-    },
-)
+# NOTE:
+# Standalone training/demo pipeline has been removed from module import path.
+# This module is imported by unified_api and should not run training automatically.
 
-start_time = time.time()
-log_print("训练前关键配置检查：")
-log_print(f"  SYMBOLS数量: {len(SYMBOLS)}")
-log_print(f"  训练集shape: {X_dict['close'].shape}")
-log_print(f"  测试集shape: {X_dict_test['close'].shape}")
-log_print(f"  IC_PERIOD: {IC_PERIOD}")
-log_print(f"  FITNESS_W_TRAIN: {FITNESS_W_TRAIN}")
-log_print(f"  FITNESS_W_TEST: {FITNESS_W_TEST}")
 
-# 训练
-gp.fit(
-    fitness_func=fitness_func,
-    fitness_args=(X_dict, y),
-    fitness_kwargs={"X_dict_test": X_dict_test, "y_test": y_test},
-)
+def _prepare_mining_panel(
+    symbols: List[str],
+    begin_time: str,
+    end_time: str,
+    ic_period: int,
+    split_name: str,
+):
+    """脚本模式下的数据准备流程（仅在 __main__ 时调用）。"""
+    cols = ["date", "open", "high", "low", "close", "volume", "open_interest", "asset"]
+    feature_cols = ["open", "close", "high", "low", "volume", "open_interest"]
+    target_col = "future_return"
 
-# 输出最优因子及其绩效指标
-log_print("\n最优因子表达式及其绩效:")
-log_print("=" * 100)
+    df_list = []
+    for symbol in symbols:
+        data = get_futures_data(
+            symbol,
+            begin_time,
+            end_time,
+            symbol_cycle=SYMBOL_CYCLE,
+        )
+        if len(data) > 0:
+            df_list.append(data)
 
-end_time = time.time()
-elapsed_time = end_time - start_time
-log_print(f"遗传编程训练完成，耗时: {elapsed_time:.2f} 秒")
+    if len(df_list) == 0:
+        raise ValueError(f"{split_name}没有有效数据，请检查合约、日期区间和数据周期")
 
-def render_text_tree(node):
+    df = pd.concat(df_list, ignore_index=True)[cols]
+    for col in feature_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df.drop_duplicates(subset=["asset", "date"], keep="last", inplace=True)
+    df.sort_values(["asset", "date"], ignore_index=True, inplace=True)
+    df = df.sort_values(["asset", "date"]).reset_index(drop=True)
+    df[target_col] = df.groupby("asset")["close"].shift(-ic_period) / df["close"] - 1
+    df = df.dropna(subset=[target_col]).reset_index(drop=True)
+    if df.empty:
+        raise ValueError(f"{split_name}计算 future_return 后为空，请调整日期区间或 IC_PERIOD")
+
+    df["time"] = df["date"]
+    df["code"] = df["asset"]
+
+    pivoted = {}
+    for col in feature_cols + [target_col]:
+        try:
+            pivoted[col] = (
+                df.pivot(index="time", columns="code", values=col)
+                .sort_index()
+                .sort_index(axis=1)
+            )
+        except Exception as e:
+            log_print(f"{split_name}特征 {col} 透视失败: {e}")
+            unique_dates = pd.Series(df["time"]).unique()
+            unique_codes = pd.Series(df["code"]).unique()
+            pivoted[col] = pd.DataFrame(
+                np.nan, index=unique_dates, columns=unique_codes
+            )
+
+    X_local = {f: pivoted[f].values for f in feature_cols}
+    y_local = pivoted[target_col].values
+    return df, pivoted, X_local, y_local
+
+
+def _print_program_tree(node):
     def node_label(n):
         return n.name if n.value is None else str(n.value)
 
@@ -6584,32 +6362,128 @@ def render_text_tree(node):
     return "\n".join(lines)
 
 
-for i, prog in enumerate(gp.best_programs_[:]):  # 显示所有因子
-    details = fitness_func(
-        prog,
-        X_dict,
-        y,
-        return_details=True,
-        function_set=gp.function_set,
-        X_dict_test=X_dict_test,
-        y_test=y_test,
-    )
-    expr = prog.to_str()
-    depth = prog.depth()
-    size = prog.size()
-    log_print(f"因子 {i + 1}:")
-    log_print(f"  表达式: {expr}")
+def run_standalone_mining():
+    """本地脚本执行入口：仅在 python factor_mining.py 时运行。"""
+    if not RUN_AS_SCRIPT:
+        return
+
+    log_print("=" * 100)
+    log_print("本地脚本模式：因子挖掘启动")
+    log_print("=" * 100)
+
+    symbols = SYMBOLS if SYMBOLS else MANUAL_SYMBOLS
+    symbols = list(dict.fromkeys(symbols))
+    if len(symbols) == 0:
+        raise ValueError("SYMBOLS 为空，请检查 SELECTED_SECTOR / MANUAL_SYMBOLS 配置")
+
+    if len(symbols) < 2:
+        log_print(
+            f"警告：当前仅 {len(symbols)} 个合约，IC 计算通常需要至少 2 个合约，结果可能无效。"
+        )
+
+    log_print(f"本次合约数量: {len(symbols)}")
+    log_print(symbols)
     log_print(
-        f"  适应度: {details['fitness']:.6f} | 训练IC: {details['mean_ic']:.6f} | 训练IR: {details['icir']:.6f} | "
-        f"测试IC: {details['mean_ic_test']:.6f} | 测试IR: {details['icir_test']:.6f}"
-    )
-    log_print(
-        f"  复杂度: 深度={depth}, 节点数={size}, 有效时间点={details['valid_ts']}/{details['total_ts']}"
+        f"训练区间: {BEGIN_TIME} ~ {END_TIME} | "
+        f"测试区间: {BEGIN_TIME_TEST} ~ {END_TIME_TEST} | "
+        f"周期: {SYMBOL_CYCLE}"
     )
 
-    # 纯文本树形输出（逐行打印，便于日志查看）
-    log_print("  因子树形结构:")
-    for line in render_text_tree(prog).splitlines():
-        log_print(f"  {line}")
+    _, _, x_train, y_train = _prepare_mining_panel(
+        symbols=symbols,
+        begin_time=BEGIN_TIME,
+        end_time=END_TIME,
+        ic_period=IC_PERIOD,
+        split_name="训练集",
+    )
+    _, _, x_test, y_test = _prepare_mining_panel(
+        symbols=symbols,
+        begin_time=BEGIN_TIME_TEST,
+        end_time=END_TIME_TEST,
+        ic_period=IC_PERIOD,
+        split_name="测试集",
+    )
 
-    log_print("-" * 100)
+    train_shape = x_train["close"].shape if "close" in x_train else (0, 0)
+    test_shape = x_test["close"].shape if "close" in x_test else (0, 0)
+    log_print(f"训练集面板形状(close): {train_shape}")
+    log_print(f"测试集面板形状(close): {test_shape}")
+    if train_shape[0] == 0 or train_shape[1] == 0:
+        raise ValueError("训练集面板为空，无法启动遗传编程")
+    if test_shape[0] == 0 or test_shape[1] == 0:
+        raise ValueError("测试集面板为空，无法启动遗传编程")
+
+    # 本地脚本默认参数可通过环境变量覆盖，便于快速调试
+    script_generations = int(os.getenv("FACTOR_MINING_SCRIPT_GENERATIONS", "15"))
+    script_population = int(os.getenv("FACTOR_MINING_SCRIPT_POPULATION", "120"))
+    script_seed = os.getenv("FACTOR_MINING_SCRIPT_SEED")
+    script_seed = None if script_seed in (None, "") else int(script_seed)
+
+    gp = GeneticProgrammer(
+        generations=script_generations,
+        population_size=script_population,
+        tournament_size=4,
+        n_components=5,
+        hall_of_fame=6,
+        function_set=FunctionSet(),
+        variable_names=["open", "close", "high", "low", "volume", "open_interest"],
+        ts_window=20,
+        random_state=script_seed,
+        const_range=(-2, 120),
+        p_crossover=0.30,
+        p_subtree_mutation=0.30,
+        p_hoist_mutation=0.10,
+        p_point_mutation=0.20,
+        immigration_rate=0.20,
+        parsimony_coefficient=0.002,
+        init_depth=(3, 8),
+        suit_size=(4, 14),
+        stagnation_threshold=6,
+        min_improvement=0.001,
+        max_restarts=3,
+        max_program_size=24,
+        max_best_program_size=24,
+        ic_objective="max",
+    )
+
+    start_ts = time.time()
+    gp.fit(
+        fitness_func=fitness_func,
+        fitness_args=(x_train, y_train),
+        fitness_kwargs={
+            "X_dict_test": x_test,
+            "y_test": y_test,
+        },
+    )
+    elapsed = time.time() - start_ts
+
+    if not gp.best_programs_:
+        raise ValueError("遗传编程未产出可用因子，请检查数据覆盖率与参数配置")
+
+    log_print("=" * 100)
+    log_print(f"训练完成，耗时: {elapsed:.2f} 秒，输出因子数量: {len(gp.best_programs_)}")
+    for idx, prog in enumerate(gp.best_programs_, start=1):
+        details = fitness_func(
+            prog,
+            x_train,
+            y_train,
+            return_details=True,
+            function_set=gp.function_set,
+            X_dict_test=x_test,
+            y_test=y_test,
+        )
+        log_print("-" * 100)
+        log_print(f"因子 {idx}: {prog.to_str()}")
+        log_print(
+            f"fitness={details['fitness']:.6f} | "
+            f"train_ic={details['mean_ic']:.6f} train_ir={details['icir']:.6f} | "
+            f"test_ic={details['mean_ic_test']:.6f} test_ir={details['icir_test']:.6f}"
+        )
+        log_print("树结构:")
+        for line in _print_program_tree(prog).splitlines():
+            log_print(f"  {line}")
+    log_print("=" * 100)
+
+
+if RUN_AS_SCRIPT:
+    run_standalone_mining()

@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 import uuid
 import time
-import io
 import os
 import json
 import base64
@@ -114,18 +113,86 @@ def get_task(task_id: str) -> TaskStatus:
 
 
 class OutputCapture:
-    def __init__(self):
+    def __init__(self, mirror=None):
         self.outputs = []
+        self.mirror = mirror
         
     def write(self, text):
+        if self.mirror is not None:
+            self.mirror.write(text)
         if text.strip():
             self.outputs.append(str(text))
             
     def flush(self):
-        pass
+        if self.mirror is not None:
+            self.mirror.flush()
         
     def get_output(self):
         return "\n".join(self.outputs)
+
+
+def _safe_float(value, default=0.0):
+    try:
+        out = float(value)
+        return out if np.isfinite(out) else default
+    except Exception:
+        return default
+
+
+def _normalize_single_factor_ic_stats(stats: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if stats is None:
+        return None
+
+    out = dict(stats)
+
+    ic_mean = out.get("ic_mean", out.get("mean_ic", 0.0))
+    icir = out.get("icir", 0.0)
+
+    ic_series = out.get("ic_series", None)
+    if ic_series is None:
+        series = np.asarray([], dtype=np.float64)
+    else:
+        series = np.asarray(ic_series, dtype=np.float64).reshape(-1)
+        series = series[np.isfinite(series)]
+
+    ic_std = out.get("ic_std", None)
+    if ic_std is None:
+        ic_std = float(np.std(series)) if series.size > 0 else 0.0
+
+    ic_pos_ratio = out.get("ic_pos_ratio", None)
+    if ic_pos_ratio is None:
+        if series.size > 0:
+            ic_pos_ratio = float(np.mean(series > 0))
+        else:
+            ic_pos_ratio = 1.0 if _safe_float(ic_mean) > 0 else 0.0
+
+    ric_mean = out.get("ric_mean", out.get("mean_ic", ic_mean))
+    ricir = out.get("ricir", icir)
+
+    out["ic_mean"] = _safe_float(ic_mean)
+    out["ic_std"] = _safe_float(ic_std)
+    out["icir"] = _safe_float(icir)
+    out["ic_pos_ratio"] = _safe_float(ic_pos_ratio)
+    out["ric_mean"] = _safe_float(ric_mean)
+    out["ricir"] = _safe_float(ricir)
+    return out
+
+
+def _configure_plot_style(plt_module) -> None:
+    plt_module.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "Arial Unicode MS", "DejaVu Sans"]
+    plt_module.rcParams["axes.unicode_minus"] = False
+    plt_module.rcParams["font.family"] = "sans-serif"
+
+
+def _save_chart_and_encode(fig, task_id: str, filename: str) -> tuple[str, str]:
+    chart_dir = os.path.join(OUTPUT_DIR, task_id, "charts")
+    os.makedirs(chart_dir, exist_ok=True)
+    chart_path = os.path.join(chart_dir, filename)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.savefig(chart_path, format="png", dpi=150, bbox_inches="tight")
+    with open(chart_path, "rb") as f:
+        chart_base64 = base64.b64encode(f.read()).decode("ascii")
+    return chart_base64, chart_path
 
 
 def run_analysis_task(task_id: str, params: FactorAnalysisParams):
@@ -134,12 +201,13 @@ def run_analysis_task(task_id: str, params: FactorAnalysisParams):
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         import single_factor_analysis as sfa
+        _configure_plot_style(plt)
         
         start_time = time.time()
         update_task(task_id, status="running", message="正在初始化...")
         
-        capture = OutputCapture()
         old_stdout = sys.stdout
+        capture = OutputCapture(mirror=old_stdout)
         sys.stdout = capture
         
         update_task(task_id, message="正在获取合约列表...", progress=10)
@@ -282,21 +350,21 @@ def run_analysis_task(task_id: str, params: FactorAnalysisParams):
         print(f"预测周期: {params.Y_PERIOD}")
         
         my_cls = sfa.My
-        exprs = sfa.eval_factors(params.formula, my_cls, X_dict, features)
+        exprs = sfa.eval_factors(params.formula, my_cls, X_dict)
         
         factor = exprs["factor"]
         
         analysis_train = sfa.panel_to_long_factor_df(factor, y, pivoted, "训练集")
         
         if X_dict_test is not None:
-            exprs_test = sfa.eval_factors(params.formula, my_cls, X_dict_test, features)
+            exprs_test = sfa.eval_factors(params.formula, my_cls, X_dict_test)
             factor_test = exprs_test["factor"]
             analysis_test = sfa.panel_to_long_factor_df(factor_test, y_test, pivoted_test, "测试集")
         else:
             analysis_test = None
         
         if X_dict_now is not None:
-            exprs_now = sfa.eval_factors(params.formula, my_cls, X_dict_now, features)
+            exprs_now = sfa.eval_factors(params.formula, my_cls, X_dict_now)
             factor_now = exprs_now["factor"]
             analysis_now = sfa.panel_to_long_factor_df(factor_now, y_now, pivoted_now, "验证集")
         else:
@@ -308,6 +376,10 @@ def run_analysis_task(task_id: str, params: FactorAnalysisParams):
         ic_test = calc_ic_stats(factor_test, y_test) if analysis_test is not None else None
         ic_now = calc_ic_stats(factor_now, y_now) if analysis_now is not None else None
         
+        ic_train = _normalize_single_factor_ic_stats(ic_train)
+        ic_test = _normalize_single_factor_ic_stats(ic_test)
+        ic_now = _normalize_single_factor_ic_stats(ic_now)
+
         summary_data = []
         if ic_train is not None:
             summary_data.append({
@@ -348,93 +420,97 @@ def run_analysis_task(task_id: str, params: FactorAnalysisParams):
         update_task(task_id, message="正在生成图表...", progress=85)
         
         charts = []
+        split_frames = [
+            ("训练集", analysis_train),
+            ("测试集", analysis_test),
+            ("验证集", analysis_now),
+        ]
+        available_frames = [
+            (label, df_part)
+            for label, df_part in split_frames
+            if df_part is not None and not df_part.empty
+        ]
+        split_colors = {
+            "训练集": "#1f77b4",
+            "测试集": "#ff7f0e",
+            "验证集": "#2ca02c",
+        }
         
-        if analysis_train is not None:
-            fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-            
-            ic_s = ic_curve_from_long(analysis_train)
-            if not ic_s.empty:
-                axes[0, 0].plot(ic_s.values)
-                axes[0, 0].set_title('训练集 IC序列')
-                axes[0, 0].axhline(0, color='r', linestyle='--')
-            
-            qret, ls = build_quantile_report(analysis_train, quantiles=params.quantiles)
-            if not qret.empty:
-                qret.mean(axis=1).plot(kind='bar', ax=axes[0, 1])
-                axes[0, 1].set_title('训练集 分位数收益')
-            
-            if not ls.empty:
-                ls.fillna(0).cumsum().plot(ax=axes[1, 0])
-                axes[1, 0].set_title('训练集 多空累计收益')
-            
-            axes[1, 1].hist(analysis_train['factor'].dropna(), bins=50)
-            axes[1, 1].set_title('训练集 因子值分布')
-            
-            plt.tight_layout()
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=100)
-            buf.seek(0)
-            chart_base64 = base64.b64encode(buf.read()).decode()
-            charts.append({"name": "训练集分析", "image": chart_base64})
-            plt.close()
-        
-        if analysis_test is not None:
-            fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-            
-            ic_s = ic_curve_from_long(analysis_test)
-            if not ic_s.empty:
-                axes[0, 0].plot(ic_s.values)
-                axes[0, 0].set_title('测试集 IC序列')
-                axes[0, 0].axhline(0, color='r', linestyle='--')
-            
-            qret, ls = build_quantile_report(analysis_test, quantiles=params.quantiles)
-            if not qret.empty:
-                qret.mean(axis=1).plot(kind='bar', ax=axes[0, 1])
-                axes[0, 1].set_title('测试集 分位数收益')
-            
-            if not ls.empty:
-                ls.fillna(0).cumsum().plot(ax=axes[1, 0])
-                axes[1, 0].set_title('测试集 多空累计收益')
-            
-            axes[1, 1].hist(analysis_test['factor'].dropna(), bins=50)
-            axes[1, 1].set_title('测试集 因子值分布')
-            
-            plt.tight_layout()
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=100)
-            buf.seek(0)
-            chart_base64 = base64.b64encode(buf.read()).decode()
-            charts.append({"name": "测试集分析", "image": chart_base64})
-            plt.close()
-        
-        if analysis_now is not None:
-            fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-            
-            ic_s = ic_curve_from_long(analysis_now)
-            if not ic_s.empty:
-                axes[0, 0].plot(ic_s.values)
-                axes[0, 0].set_title('验证集 IC序列')
-                axes[0, 0].axhline(0, color='r', linestyle='--')
-            
-            qret, ls = build_quantile_report(analysis_now, quantiles=params.quantiles)
-            if not qret.empty:
-                qret.mean(axis=1).plot(kind='bar', ax=axes[0, 1])
-                axes[0, 1].set_title('验证集 分位数收益')
-            
-            if not ls.empty:
-                ls.fillna(0).cumsum().plot(ax=axes[1, 0])
-                axes[1, 0].set_title('验证集 多空累计收益')
-            
-            axes[1, 1].hist(analysis_now['factor'].dropna(), bins=50)
-            axes[1, 1].set_title('验证集 因子值分布')
-            
-            plt.tight_layout()
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=100)
-            buf.seek(0)
-            chart_base64 = base64.b64encode(buf.read()).decode()
-            charts.append({"name": "验证集分析", "image": chart_base64})
-            plt.close()
+        if available_frames:
+            fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+            fig.suptitle("单因子综合分析图", fontsize=14, fontweight="bold")
+
+            plotted_ic = 0
+            plotted_ls = 0
+            quantile_means = {}
+
+            for label, long_df in available_frames:
+                color = split_colors.get(label, None)
+
+                ic_s = ic_curve_from_long(long_df)
+                if not ic_s.empty:
+                    axes[0, 0].plot(ic_s.index, ic_s.values, label=label, color=color)
+                    plotted_ic += 1
+
+                qret, ls = build_quantile_report(long_df, quantiles=params.quantiles)
+                if not qret.empty:
+                    # qret: index=time, columns=quantile；这里按列求均值得到“分位数平均收益”
+                    quantile_means[label] = qret.mean(axis=0)
+
+                if not ls.empty:
+                    ls_curve = ls.fillna(0).cumsum()
+                    axes[1, 0].plot(ls_curve.index, ls_curve.values, label=label, color=color)
+                    plotted_ls += 1
+
+            axes[0, 0].axhline(0, color="r", linestyle="--")
+            axes[0, 0].set_title("分组IC序列（训练/测试/验证）")
+            if plotted_ic > 0:
+                axes[0, 0].legend()
+
+            if quantile_means:
+                quantile_idx = sorted(
+                    {q for series in quantile_means.values() for q in series.index}
+                )
+                n_group = len(quantile_means)
+                x = np.arange(len(quantile_idx))
+                width = 0.8 / max(n_group, 1)
+                for i, (label, series) in enumerate(quantile_means.items()):
+                    color = split_colors.get(label, None)
+                    values = [float(series.get(q, np.nan)) for q in quantile_idx]
+                    axes[0, 1].bar(x + i * width, values, width=width, label=label, color=color, alpha=0.85)
+                axes[0, 1].set_xticks(x + width * (n_group - 1) / 2)
+                axes[0, 1].set_xticklabels([str(q) for q in quantile_idx])
+                axes[0, 1].axhline(0, color="black", linestyle="--", alpha=0.6)
+                axes[0, 1].set_title("分位数平均收益（训练/测试/验证）")
+                axes[0, 1].legend()
+            else:
+                axes[0, 1].set_title("分位数平均收益（训练/测试/验证）")
+
+            axes[1, 0].axhline(0, color="black", linestyle="--", alpha=0.6)
+            axes[1, 0].set_title("多空累计收益（训练/测试/验证）")
+            if plotted_ls > 0:
+                axes[1, 0].legend()
+
+            plotted_hist = 0
+            for label, long_df in available_frames:
+                vals = long_df["factor"].dropna()
+                if vals.empty:
+                    continue
+                color = split_colors.get(label, None)
+                axes[1, 1].hist(vals, bins=40, alpha=0.35, label=label, color=color)
+                plotted_hist += 1
+            axes[1, 1].set_title("因子值分布（训练/测试/验证）")
+            if plotted_hist > 0:
+                axes[1, 1].legend()
+
+            chart_base64, chart_path = _save_chart_and_encode(fig, task_id, "single_factor_combined.png")
+            charts.append({
+                "name": "综合分析",
+                "image": chart_base64,
+                "image_data_uri": f"data:image/png;base64,{chart_base64}",
+                "source_path": chart_path,
+            })
+            plt.close(fig)
         
         elapsed_time = time.time() - start_time
         

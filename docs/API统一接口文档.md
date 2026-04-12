@@ -32,8 +32,9 @@ pip install fastapi uvicorn pandas numpy matplotlib pydantic
 ### 2. 启动服务
 
 ```bash
-python unified_api.py
-```
+cd /d D:\PythonCode\computer_design
+D:/软件/期魔方/coder/python3116/python.exe d:/PythonCode/computer_design/src/api/unified_api.py
+``` 
 
 服务默认运行在 `http://0.0.0.0:8000`
 

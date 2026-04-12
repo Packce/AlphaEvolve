@@ -64,16 +64,17 @@ plt.rcParams['axes.formatter.limits'] = (-3, 3)
 
 COLORS = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#3F88C5']
 COMBINED_COLORS = ['#2E86AB', '#2E86AB', '#2E86AB', '#2E86AB', '#2E86AB']
+RUN_AS_SCRIPT = __name__ == "__main__"
 
 # ## 需要调整的全局变量参数
 
 # 使用转换器的因子表达式（多因子列表）
 # formula = ["CORR(TS_ZSCORE(high, LV(high, 5)), EMV(85), open_interest)"]
 formula = [
-    "MIN(FORCAST(MIN(BOLL_UPPER(68, 8.56172617410534), open), 8), LOWRANGE(DPO(47, 36)))",
-    "CORR(TS_ZSCORE(high, LV(high, 5)), EMV(85), open_interest)",
+    "RANK(WR(2), BOLL_UPPER(24, 2.26))",
+    "LOWRANGE(BIAS(90))",
+    "HHVBARS(KDJ_K(4, 84), COS(MACD_DEA(49, 46, 88)))",
     "WR(2)",
-    "HHVBARS(LLV(SMA(close, TS_RANK(ROC(33), BRAR_AR(92)), 5.0), 0.003), TAN(CCI(112)))"
 ]
 
 # 是否使用转换器，不使用时需修改手动计算因子中的因子表达式
@@ -251,10 +252,14 @@ def get_symbols_by_sector(selected, sector_map, manual_symbols):
     print("警告：列表格式不正确，使用手动指定的合约列表")
     return manual_symbols
 
-SYMBOLS = get_symbols_by_sector(SELECTED_SECTOR, FUTURES_SECTORS, MANUAL_SYMBOLS)
+if RUN_AS_SCRIPT:
+    SYMBOLS = get_symbols_by_sector(SELECTED_SECTOR, FUTURES_SECTORS, MANUAL_SYMBOLS)
+else:
+    SYMBOLS = []
 
-print(f"当前使用的合约列表（共 {len(SYMBOLS)} 个合约）：")
-print(SYMBOLS)
+if RUN_AS_SCRIPT:
+    print(f"当前使用的合约列表（共 {len(SYMBOLS)} 个合约）：")
+    print(SYMBOLS)
 
 
 # ## 新的获取数据
@@ -290,7 +295,8 @@ SYMBOL_CYCLE_MAP = {
 }
 
 # 获取所有合约的数据，已注释掉
-print("开始获取数据...")
+if RUN_AS_SCRIPT:
+    print("开始获取数据...")
 # for symbol in SYMBOLS:
 #     print(f"训练集：正在获取 {symbol} 的数据...")
 #     asyncio.run(qmf_model_sdk.get_futures_data(symbol, BEGIN_TIME, END_TIME, SYMBOL_CYCLE))
@@ -300,31 +306,63 @@ print("开始获取数据...")
 # for symbol in SYMBOLS:
 #     print(f"真实集：正在获取 {symbol} 的数据...")
 #     asyncio.run(qmf_model_sdk.get_futures_data(symbol, BEGIN_TIME_NOW, END_TIME_NOW, SYMBOL_CYCLE))
-print("数据获取完成！")
+if RUN_AS_SCRIPT:
+    print("数据获取完成！")
 
-def get_futures_data(symbol, start_time=None, end_time=None):
+def get_futures_data(symbol, start_time=None, end_time=None, symbol_cycle=None):
     """获取单个合约的数据"""
+    empty_columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']
     if load_kline is None:
         print(f"警告：qmf_data 不可用，{symbol} 无法获取数据")
-        return pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
+        return pd.DataFrame(columns=empty_columns)
 
     if start_time is None:
         start_time = f"{BEGIN_TIME} 00:00:00"
     elif len(str(start_time)) == 10:
         start_time = f"{start_time} 00:00:00"
     if end_time is None:
+        # 默认按训练区间结束，避免调用方漏传时把训练集拉到验证期
         end_time = f"{END_TIME} 23:59:59"
     elif len(str(end_time)) == 10:
         end_time = f"{end_time} 23:59:59"
 
+    raw_symbol_cycle = symbol_cycle
+    cycle_name = str(symbol_cycle).strip() if symbol_cycle is not None else ""
+    used_default_cycle = False
+    if not cycle_name:
+        cycle_name = SYMBOL_CYCLE
+        used_default_cycle = True
+    elif cycle_name not in SYMBOL_CYCLE_MAP:
+        print(f"警告：未知周期 {raw_symbol_cycle!r}，已回退到默认周期 {SYMBOL_CYCLE!r}")
+        cycle_name = SYMBOL_CYCLE
+        used_default_cycle = True
+
+    mapped_cycle = SYMBOL_CYCLE_MAP[cycle_name]
+    print(
+        f"[Multi][get_futures_data] symbol={symbol} "
+        f"symbol_cycle={raw_symbol_cycle!r} normalized_cycle={cycle_name!r} "
+        f"mapped_cycle={mapped_cycle!r} used_default_cycle={used_default_cycle}"
+    )
     # data = load_kline(product=symbol, cycle="1D", start_time=start_time, end_time=end_time)
     # data = load_kline(product=symbol, cycle="15min", start_time=start_time, end_time=end_time)
-    data = load_kline(product=symbol, cycle=SYMBOL_CYCLE_MAP[SYMBOL_CYCLE], start_time=start_time, end_time=end_time)
+    try:
+        data = load_kline(
+            product=symbol,
+            cycle=mapped_cycle,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    except Exception as exc:
+        print(
+            f"警告：读取 {symbol} 行情失败，已跳过。"
+            f"cycle={mapped_cycle!r} start={start_time!r} end={end_time!r} err={exc}"
+        )
+        return pd.DataFrame(columns=empty_columns)
 
     # 检查数据是否为空或没有 'date' 列
     if data is None or len(data) == 0 or 'date' not in data.columns:
         print(f"警告：{symbol} 在指定时间范围内没有数据，跳过该合约")
-        return pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
+        return pd.DataFrame(columns=empty_columns)
 
     data["date"] = pd.to_datetime(data["date"]+data["time"], errors="coerce")
     # print(data)
@@ -333,300 +371,216 @@ def get_futures_data(symbol, start_time=None, end_time=None):
     data['asset'] = symbol
     return data
 
-# 获取所有合约数据并合并
-df_list = []
-df_list_test = []
-df_list_now = []
-for symbol in SYMBOLS:
-    data = get_futures_data(symbol)
-    if len(data) > 0:
-        df_list.append(data)
-    data_test = get_futures_data(symbol, BEGIN_TIME_TEST, END_TIME_TEST)
-    if len(data_test) > 0:
-        df_list_test.append(data_test)
-    data_now = get_futures_data(symbol, BEGIN_TIME_NOW, END_TIME_NOW)
-    if len(data_now) > 0:
-        df_list_now.append(data_now)
+# 仅在脚本直跑时准备演示数据；被 API 导入时跳过这段重流程，避免副作用日志与额外取数。
+def _prepare_multi_factor_script_data():
+    def _build_panel(df_input, features_input, target_input, split_name):
+        print(f"\n构造{split_name}数据...")
+        pivoted_local = {}
+        all_cols = features_input + [target_input]
+        unique_cols = list(dict.fromkeys(all_cols))
+        if len(unique_cols) != len(all_cols):
+            dup_cols = [c for c in set(all_cols) if all_cols.count(c) > 1]
+            print(f"发现重复列，已去重: {dup_cols}")
 
-# 检查是否有有效数据
-if len(df_list) == 0:
-    if not QMF_DATA_AVAILABLE:
-        print("警告：qmf_data 不可用，将使用空数据集继续")
+        for col in unique_cols:
+            try:
+                pivoted_local[col] = (
+                    df_input.pivot(index='time', columns='code', values=col)
+                    .sort_index()
+                    .sort_index(axis=1)
+                )
+                print(f"特征 {col} 转换成功，形状: {pivoted_local[col].shape}")
+            except Exception as e:
+                print(f"特征 {col} 转换失败: {e}")
+                unique_dates = pd.Series(df_input['time']).unique()
+                unique_codes = pd.Series(df_input['code']).unique()
+                pivoted_local[col] = pd.DataFrame(0, index=unique_dates, columns=unique_codes)
+
+        x_dict_local = {f: pivoted_local[f].values for f in features_input}
+        y_local = pivoted_local[target_input].values
+        return pivoted_local, x_dict_local, y_local
+
+    def _preprocess(df_input, split_name):
+        out = df_input.copy()
+        out["open"] = pd.to_numeric(out["open"], errors="coerce")
+        out["high"] = pd.to_numeric(out["high"], errors="coerce")
+        out["low"] = pd.to_numeric(out["low"], errors="coerce")
+        out["close"] = pd.to_numeric(out["close"], errors="coerce")
+        out["volume"] = pd.to_numeric(out["volume"], errors="coerce")
+        out["open_interest"] = pd.to_numeric(out["open_interest"], errors="coerce")
+
+        out.drop_duplicates(subset=["asset", "date"], keep="last", inplace=True)
+        out.sort_values(["asset", "date"], ignore_index=True, inplace=True)
+        print(f"{split_name}数据预处理完成，共 {len(out)} 条记录")
+
+        print(f"计算{split_name}目标变量...")
+        out = out.sort_values(["asset", "date"]).reset_index(drop=True)
+        out['future_return'] = out.groupby("asset")['close'].shift(-Y_PERIOD) / out['close'] - 1
+        out = out.dropna(subset=['future_return']).reset_index(drop=True)
+
+        out['time'] = out['date']
+        out['code'] = out['asset']
+        return out
+
+    # 获取所有合约数据并合并
+    df_list = []
+    df_list_test = []
+    df_list_now = []
+    for symbol in SYMBOLS:
+        data = get_futures_data(symbol, BEGIN_TIME, END_TIME)
+        if len(data) > 0:
+            df_list.append(data)
+        data_test = get_futures_data(symbol, BEGIN_TIME_TEST, END_TIME_TEST)
+        if len(data_test) > 0:
+            df_list_test.append(data_test)
+        data_now = get_futures_data(symbol, BEGIN_TIME_NOW, END_TIME_NOW)
+        if len(data_now) > 0:
+            df_list_now.append(data_now)
+
+    # 检查是否有有效数据
+    if len(df_list) == 0:
+        if not QMF_DATA_AVAILABLE:
+            print("警告：qmf_data 不可用，将使用空数据集继续")
+        else:
+            print("警告：所有合约在指定时间范围内都没有数据")
+
+    if len(df_list_test) == 0:
+        if not QMF_DATA_AVAILABLE:
+            print("警告：qmf_data 不可用，将使用空数据集继续")
+        else:
+            print("警告：所有合约在指定时间范围内都没有数据")
+
+    if len(df_list_now) == 0:
+        if not QMF_DATA_AVAILABLE:
+            print("警告：qmf_data 不可用，将使用空数据集继续")
+        else:
+            print("警告：所有合约在指定时间范围内都没有数据")
+
+    cols = ['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']
+    df = pd.concat(df_list, ignore_index=True)[cols] if df_list else pd.DataFrame(columns=cols)
+    df_test = pd.concat(df_list_test, ignore_index=True)[cols] if df_list_test else pd.DataFrame(columns=cols)
+    df_now = pd.concat(df_list_now, ignore_index=True)[cols] if df_list_now else pd.DataFrame(columns=cols)
+
+    # 数据预处理
+    df = _preprocess(df, "训练集")
+    df_test = _preprocess(df_test, "测试集")
+    df_now = _preprocess(df_now, "真实集")
+
+    # 选择特征和目标（只保留基础行情数据，技术指标在遗传编程中通过函数调用生成）
+    features_local = ['open', 'close', 'high', 'low', 'volume', 'open_interest']
+    target_local = 'future_return'
+
+    print(f"原始数据行数: {len(df)}")
+    data = df[features_local + [target_local, 'code', 'time']].copy()
+    data_test = df_test[features_local + [target_local, 'code', 'time']].copy()
+    data_now = df_now[features_local + [target_local, 'code', 'time']].copy()
+
+    # 构造训练/测试/真实数据
+    pivoted, X_dict, y = _build_panel(data, features_local, target_local, "训练")
+    pivoted_test, X_dict_test, y_test = _build_panel(data_test, features_local, target_local, "测试")
+    pivoted_now, X_dict_now, y_now = _build_panel(data_now, features_local, target_local, "真实")
+
+    print("\n训练数据准备完成:")
+    print(f"时间点数量: {y.shape[0]}")
+    print(f"合约数量: {y.shape[1]}")
+    print(f"特征数量: {len(features_local)}")
+    print(f"特征列表: {features_local}")
+
+    print("\n测试数据准备完成:")
+    print(f"时间点数量: {y_test.shape[0]}")
+    print(f"合约数量: {y_test.shape[1]}")
+    print(f"特征数量: {len(features_local)}")
+    print(f"特征列表: {features_local}")
+
+    print("\n真实数据准备完成:")
+    print(f"时间点数量: {y_now.shape[0]}")
+    print(f"合约数量: {y_now.shape[1]}")
+    print(f"特征数量: {len(features_local)}")
+    print(f"特征列表: {features_local}")
+
+    # 检查训练集数据质量
+    print("\n数据质量检查:")
+    if y.size > 0:
+        print(f"y中NaN比例: {np.isnan(y).sum() / y.size:.2%}")
     else:
-        print("警告：所有合约在指定时间范围内都没有数据")
+        print("y中NaN比例: nan%")
+    print(f"y中有效值数量: {np.sum(~np.isnan(y))}")
+    train_times = pivoted[features_local[0]].index if features_local and features_local[0] in pivoted else None
+    if train_times is not None and len(train_times) > 0:
+        print(f"训练集最小时间: {train_times.min()}, 最大时间: {train_times.max()}")
+    for f in features_local[:5]:
+        if f in X_dict:
+            denom = X_dict[f].size
+            if denom > 0:
+                nan_ratio = np.isnan(X_dict[f]).sum() / denom
+                print(f"  {f}: NaN比例={nan_ratio:.2%}")
+            else:
+                print(f"  {f}: NaN比例=nan%")
 
-if len(df_list_test) == 0:
-    if not QMF_DATA_AVAILABLE:
-        print("警告：qmf_data 不可用，将使用空数据集继续")
+    # 检查测试集数据质量
+    print("\n测试集数据质量检查:")
+    if y_test.size > 0:
+        print(f"y_test中NaN比例: {np.isnan(y_test).sum() / y_test.size:.2%}")
     else:
-        print("警告：所有合约在指定时间范围内都没有数据")
+        print("y_test中NaN比例: nan%")
+    print(f"y_test中有效值数量: {np.sum(~np.isnan(y_test))}")
+    test_times = pivoted_test[features_local[0]].index if features_local and features_local[0] in pivoted_test else None
+    if test_times is not None and len(test_times) > 0:
+        print(f"测试集最小时间: {test_times.min()}, 最大时间: {test_times.max()}")
+    for f in features_local[:5]:
+        if f in X_dict_test:
+            denom = X_dict_test[f].size
+            if denom > 0:
+                nan_ratio = np.isnan(X_dict_test[f]).sum() / denom
+                print(f"  {f}: NaN比例={nan_ratio:.2%}")
+            else:
+                print(f"  {f}: NaN比例=nan%")
 
-if len(df_list_now) == 0:
-    if not QMF_DATA_AVAILABLE:
-        print("警告：qmf_data 不可用，将使用空数据集继续")
+    # 检查真实集数据质量
+    print("\n真实集数据质量检查:")
+    if y_now.size > 0:
+        print(f"y_now中NaN比例: {np.isnan(y_now).sum() / y_now.size:.2%}")
     else:
-        print("警告：所有合约在指定时间范围内都没有数据")
+        print("y_now中NaN比例: nan%")
+    print(f"y_now中有效值数量: {np.sum(~np.isnan(y_now))}")
+    now_times = pivoted_now[features_local[0]].index if features_local and features_local[0] in pivoted_now else None
+    if now_times is not None and len(now_times) > 0:
+        print(f"真实集最小时间: {now_times.min()}, 最大时间: {now_times.max()}")
+    for f in features_local[:5]:
+        if f in X_dict_now:
+            denom = X_dict_now[f].size
+            if denom > 0:
+                nan_ratio = np.isnan(X_dict_now[f]).sum() / denom
+                print(f"  {f}: NaN比例={nan_ratio:.2%}")
+            else:
+                print(f"  {f}: NaN比例=nan%")
 
-if df_list:
-    df = pd.concat(df_list, ignore_index=True)
-    df = df[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
-else:
-    df = pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
-
-if df_list_test:
-    df_test = pd.concat(df_list_test, ignore_index=True)
-    df_test = df_test[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
-else:
-    df_test = pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
-
-if df_list_now:
-    df_now = pd.concat(df_list_now, ignore_index=True)
-    df_now = df_now[['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset']]
-else:
-    df_now = pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume', 'open_interest', 'asset'])
-
-df
-
-
-# ## 数据预处理
-# 数据预处理
-df["open"] = pd.to_numeric(df["open"], errors="coerce")
-df["high"] = pd.to_numeric(df["high"], errors="coerce")
-df["low"] = pd.to_numeric(df["low"], errors="coerce")
-df["close"] = pd.to_numeric(df["close"], errors="coerce")
-df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
-df["open_interest"] = pd.to_numeric(df["open_interest"], errors="coerce")
-
-df_test["open"] = pd.to_numeric(df_test["open"], errors="coerce")
-df_test["high"] = pd.to_numeric(df_test["high"], errors="coerce")
-df_test["low"] = pd.to_numeric(df_test["low"], errors="coerce")
-df_test["close"] = pd.to_numeric(df_test["close"], errors="coerce")
-df_test["volume"] = pd.to_numeric(df_test["volume"], errors="coerce")
-df_test["open_interest"] = pd.to_numeric(df_test["open_interest"], errors="coerce")
-
-df_now["open"] = pd.to_numeric(df_now["open"], errors="coerce")
-df_now["high"] = pd.to_numeric(df_now["high"], errors="coerce")
-df_now["low"] = pd.to_numeric(df_now["low"], errors="coerce")
-df_now["close"] = pd.to_numeric(df_now["close"], errors="coerce")
-df_now["volume"] = pd.to_numeric(df_now["volume"], errors="coerce")
-df_now["open_interest"] = pd.to_numeric(df_now["open_interest"], errors="coerce")
-
-# 去重
-df.drop_duplicates(subset=["asset", "date"], keep="last", inplace=True)
-df.sort_values(["asset", "date"], ignore_index=True, inplace=True)
-
-df_test.drop_duplicates(subset=["asset", "date"], keep="last", inplace=True)
-df_test.sort_values(["asset", "date"], ignore_index=True, inplace=True)
-
-df_now.drop_duplicates(subset=["asset", "date"], keep="last", inplace=True)
-df_now.sort_values(["asset", "date"], ignore_index=True, inplace=True)
-
-print(f"训练集数据预处理完成，共 {len(df)} 条记录")
-
-print(f"测试集数据预处理完成，共 {len(df_test)} 条记录")
-
-print(f"真实集数据预处理完成，共 {len(df_now)} 条记录")
-
-# 计算未来5天收益（目标变量）
-print("计算训练集目标变量...")
-df = df.sort_values(["asset", "date"]).reset_index(drop=True)
-df['future_return'] = df.groupby("asset")['close'].shift(-Y_PERIOD) / df['close'] - 1
-
-print("计算测试集目标变量...")
-df_test = df_test.sort_values(["asset", "date"]).reset_index(drop=True)
-df_test['future_return'] = df_test.groupby("asset")['close'].shift(-Y_PERIOD) / df_test['close'] - 1
-
-print("计算真实集目标变量...")
-df_now = df_now.sort_values(["asset", "date"]).reset_index(drop=True)
-df_now['future_return'] = df_now.groupby("asset")['close'].shift(-Y_PERIOD) / df_now['close'] - 1
-
-# 删除目标变量为空的行
-df = df.dropna(subset=['future_return']).reset_index(drop=True)
-df_test = df_test.dropna(subset=['future_return']).reset_index(drop=True)
-df_now = df_now.dropna(subset=['future_return']).reset_index(drop=True)
+    return {
+        "df": df,
+        "df_test": df_test,
+        "df_now": df_now,
+        "features": features_local,
+        "target": target_local,
+        "data": data,
+        "data_test": data_test,
+        "data_now": data_now,
+        "pivoted": pivoted,
+        "pivoted_test": pivoted_test,
+        "pivoted_now": pivoted_now,
+        "X_dict": X_dict,
+        "X_dict_test": X_dict_test,
+        "X_dict_now": X_dict_now,
+        "y": y,
+        "y_test": y_test,
+        "y_now": y_now,
+        "X_TRAIN_SHAPE": X_dict.get("close", np.empty((0, 0))).shape,
+        "X_TEST_SHAPE": X_dict_test.get("close", np.empty((0, 0))).shape,
+        "X_NOW_SHAPE": X_dict_now.get("close", np.empty((0, 0))).shape,
+    }
 
 
-# 将列名适配：date -> time, asset -> code
-df['time'] = df['date']
-df['code'] = df['asset']
-df_test['time'] = df_test['date']
-df_test['code'] = df_test['asset']
-df_now['time'] = df_now['date']
-df_now['code'] = df_now['asset']
-
-# 选择特征和目标（只保留基础行情数据，技术指标在遗传编程中通过函数调用生成）
-features = ['open', 'close', 'high', 'low', 'volume', 'open_interest']
-# features = []
-target = 'future_return'
-
-# 数据预处理
-print(f"原始数据行数: {len(df)}")
-data = df[features + [target, 'code', 'time']].copy()
-data_test = df_test[features + [target, 'code', 'time']].copy()
-data_now = df_now[features + [target, 'code', 'time']].copy()
-
-# 构造训练集X, y（T, N）格式，T为时间，N为合约数
-print("\n构造训练数据...")
-pivoted = {}
-all_cols = features + [target]
-unique_cols = list(dict.fromkeys(all_cols))
-if len(unique_cols) != len(all_cols):
-    dup_cols = [c for c in set(all_cols) if all_cols.count(c) > 1]
-    print("发现重复列，已去重: %s", dup_cols)
-for col in unique_cols:
-    try:
-        pivoted[col] = data.pivot(index='time', columns='code', values=col).sort_index().sort_index(axis=1)
-        print(f"特征 {col} 转换成功，形状: {pivoted[col].shape}")
-    except Exception as e:
-        print(f"特征 {col} 转换失败: {e}")
-        # 创建全零矩阵作为替代
-        unique_dates = pd.Series(data['time']).unique()
-        unique_codes = pd.Series(data['code']).unique()
-        pivoted[col] = pd.DataFrame(0, index=unique_dates, columns=unique_codes)
-
-# 构造测试集X, y（T, N）格式，T为时间，N为合约数
-print("\n构造测试数据...")
-pivoted_test = {}
-all_cols_test = features + [target]
-unique_cols_test = list(dict.fromkeys(all_cols_test))
-if len(unique_cols_test) != len(all_cols_test):
-    dup_cols_test = [c for c in set(all_cols_test) if all_cols_test.count(c) > 1]
-    print("发现重复列，已去重: %s", dup_cols_test)
-for col in unique_cols_test:
-    try:
-        pivoted_test[col] = data_test.pivot(index='time', columns='code', values=col).sort_index().sort_index(axis=1)
-        print(f"特征 {col} 转换成功，形状: {pivoted_test[col].shape}")
-    except Exception as e:
-        print(f"特征 {col} 转换失败: {e}")
-        # 创建全零矩阵作为替代
-        unique_dates_test = pd.Series(data_test['time']).unique()
-        unique_codes_test = pd.Series(data_test['code']).unique()
-        pivoted_test[col] = pd.DataFrame(0, index=unique_dates_test, columns=unique_codes_test)
-
-# 构造真实集X, y（T, N）格式，T为时间，N为合约数
-print("\n构造真实数据...")
-pivoted_now = {}
-all_cols_now = features + [target]
-unique_cols_now = list(dict.fromkeys(all_cols_now))
-if len(unique_cols_now) != len(all_cols_now):
-    dup_cols_now = [c for c in set(all_cols_now) if all_cols_now.count(c) > 1]
-    print("发现重复列，已去重: %s", dup_cols_now)
-for col in unique_cols_now:
-    try:
-        pivoted_now[col] = data_now.pivot(index='time', columns='code', values=col).sort_index().sort_index(axis=1)
-        print(f"特征 {col} 转换成功，形状: {pivoted_now[col].shape}")
-    except Exception as e:
-        print(f"特征 {col} 转换失败: {e}")
-        # 创建全零矩阵作为替代
-        unique_dates_now = pd.Series(data_now['time']).unique()
-        unique_codes_now = pd.Series(data_now['code']).unique()
-        pivoted_now[col] = pd.DataFrame(0, index=unique_dates_now, columns=unique_codes_now)
-
-# 训练集
-X_dict = {f: pivoted[f].values for f in features}
-y = pivoted[target].values  # (T, N)
-print("\n训练数据准备完成:")
-print(f"时间点数量: {y.shape[0]}")
-print(f"合约数量: {y.shape[1]}")
-print(f"特征数量: {len(features)}")
-print(f"特征列表: {features[:10]}..." if len(features) > 10 else f"特征列表: {features}")
-# print({k: v.shape for k, v in X_dict.items()})
-
-# 将X_dict整体保存为一个CSV文件
-# 合并为多层列索引的DataFrame，索引为时间，列为MultiIndex(特征, 合约)
-# multi_cols = pd.MultiIndex.from_product([features, pivoted[features[0]].columns], names=["feature", "code"])
-# X_df = pd.DataFrame(
-#     np.hstack([X_dict[f] for f in features]),
-#     index=pivoted[features[0]].index,
-#     columns=multi_cols
-# )
-# X_df.to_csv("train_X_dict_all.csv")
-# print("训练集X_dict已保存为 train_X_dict_all.csv。")
-
-# 测试集
-X_dict_test = {f: pivoted_test[f].values for f in features}
-y_test = pivoted_test[target].values  # (T, N)
-print("\n真实数据准备完成:")
-print(f"时间点数量: {y_test.shape[0]}")
-print(f"合约数量: {y_test.shape[1]}")
-print(f"特征数量: {len(features)}")
-print(f"特征列表: {features[:10]}..." if len(features) > 10 else f"特征列表: {features}")
-
-# 将X_dict_test整体保存为一个CSV文件
-# multi_cols_test = pd.MultiIndex.from_product([features, pivoted_test[features[0]].columns], names=["feature", "code"])
-# X_df_test = pd.DataFrame(
-#     np.hstack([X_dict_test[f] for f in features]),
-#     index=pivoted_test[features[0]].index,
-#     columns=multi_cols_test
-# )
-# X_df_test.to_csv("test_X_dict_all.csv")
-# print("测试集X_dict_test已保存为 test_X_dict_all.csv。")
-
-# 真实集
-X_dict_now = {f: pivoted_now[f].values for f in features}
-y_now = pivoted_now[target].values  # (T, N)
-print("\n测试数据准备完成:")
-print(f"时间点数量: {y_now.shape[0]}")
-print(f"合约数量: {y_now.shape[1]}")
-print(f"特征数量: {len(features)}")
-print(f"特征列表: {features[:10]}..." if len(features) > 10 else f"特征列表: {features}")
-
-# 将X_dict_now整体保存为一个CSV文件
-# multi_col_now = pd.MultiIndex.from_product([features, pivoted_now[features[0]].columns], names=["feature", "code"])
-# X_df_now = pd.DataFrame(
-#     np.hstack([X_dict_now[f] for f in features]),
-#     index=pivoted_now[features[0]].index,
-#     columns=multi_cols_now
-# )
-# X_df_now.to_csv("test_X_dict_all.csv")
-# print("真实集X_dict_now已保存为 test_X_dict_all.csv。")
-
-
-# 检查训练集数据质量
-print("\n数据质量检查:")
-print(f"y中NaN比例: {np.isnan(y).sum() / y.size:.2%}")
-print(f"y中有效值数量: {np.sum(~np.isnan(y))}")
-# 打印训练集最小时间和最大时间
-train_times = pivoted[features[0]].index if features and features[0] in pivoted else None
-if train_times is not None and len(train_times) > 0:
-    print(f"训练集最小时间: {train_times.min()}, 最大时间: {train_times.max()}")
-
-for f in features[:5]:  # 只检查前5个特征
-    if f in X_dict:
-        nan_ratio = np.isnan(X_dict[f]).sum() / X_dict[f].size
-        print(f"  {f}: NaN比例={nan_ratio:.2%}")
-
-# 检查测试集数据质量
-print("\n测试集数据质量检查:")
-print(f"y_test中NaN比例: {np.isnan(y_test).sum() / y_test.size:.2%}")
-print(f"y_test中有效值数量: {np.sum(~np.isnan(y_test))}")
-# 打印测试集最小时间和最大时间
-test_times = pivoted_test[features[0]].index if features and features[0] in pivoted_test else None
-if test_times is not None and len(test_times) > 0:
-    print(f"测试集最小时间: {test_times.min()}, 最大时间: {test_times.max()}")
-
-for f in features[:5]:  # 只检查前5个特征
-    if f in X_dict_test:
-        nan_ratio = np.isnan(X_dict_test[f]).sum() / X_dict_test[f].size
-        print(f"  {f}: NaN比例={nan_ratio:.2%}")
-
-# 检查真实集数据质量
-print("\n真实集数据质量检查:")
-print(f"y_now中NaN比例: {np.isnan(y_now).sum() / y_now.size:.2%}")
-print(f"y_now中有效值数量: {np.sum(~np.isnan(y_now))}")
-# 打印测试集最小时间和最大时间
-now_times = pivoted_now[features[0]].index if features and features[0] in pivoted_now else None
-if now_times is not None and len(now_times) > 0:
-    print(f"真实集最小时间: {now_times.min()}, 最大时间: {now_times.max()}")
-
-for f in features[:5]:  # 只检查前5个特征
-    if f in X_dict_now:
-        nan_ratio = np.isnan(X_dict_now[f]).sum() / X_dict_now[f].size
-        print(f"  {f}: NaN比例={nan_ratio:.2%}")
-
-X_TRAIN_SHAPE = X_dict["close"].shape
-X_TEST_SHAPE = X_dict_test["close"].shape
-X_NOW_SHAPE = X_dict_now["close"].shape
+if RUN_AS_SCRIPT:
+    globals().update(_prepare_multi_factor_script_data())
 
 # print(y)
 
@@ -3602,41 +3556,87 @@ def eval_factors(
     formula,
     my_cls: Any,
     X_dict: Dict[str, np.ndarray],
-    X_dict_now: Dict[str, np.ndarray],
-    X_dict_test: Dict[str, np.ndarray],
+    X_dict_now: Optional[Dict[str, np.ndarray]] = None,
+    X_dict_test: Optional[Dict[str, np.ndarray]] = None,
 ):
     exprs = build_factor_expressions(formula=formula, my_cls=my_cls, my_name="My")
-    env = {
-        "np": np,
-        "My": my_cls,
-        "X_dict": X_dict,
-        "X_dict_now": X_dict_now,
-        "X_dict_test": X_dict_test,
-    }
+
     if isinstance(formula, list):
-        return {name: [eval(expr, env, {}) for expr in expr_list] for name, expr_list in exprs.items()}
+        out = {}
+
+        env = {
+            "np": np,
+            "My": my_cls,
+            "X_dict": X_dict,
+        }
+        out["factor"] = [eval(expr, env, {}) for expr in exprs["factor"]]
+
+        if isinstance(X_dict_now, dict):
+            env_now = {
+                "np": np,
+                "My": my_cls,
+                "X_dict_now": X_dict_now,
+            }
+            out["factor_now"] = [eval(expr, env_now, {}) for expr in exprs["factor_now"]]
+
+        if isinstance(X_dict_test, dict):
+            env_test = {
+                "np": np,
+                "My": my_cls,
+                "X_dict_test": X_dict_test,
+            }
+            out["factor_test"] = [eval(expr, env_test, {}) for expr in exprs["factor_test"]]
+
+        return out
     else:
-        return {name: eval(expr, env, {}) for name, expr in exprs.items()}# #### 使用转换器计算因子
+        out = {}
+
+        env = {
+            "np": np,
+            "My": my_cls,
+            "X_dict": X_dict,
+        }
+        out["factor"] = eval(exprs["factor"], env, {})
+
+        if isinstance(X_dict_now, dict):
+            env_now = {
+                "np": np,
+                "My": my_cls,
+                "X_dict_now": X_dict_now,
+            }
+            out["factor_now"] = eval(exprs["factor_now"], env_now, {})
+
+        if isinstance(X_dict_test, dict):
+            env_test = {
+                "np": np,
+                "My": my_cls,
+                "X_dict_test": X_dict_test,
+            }
+            out["factor_test"] = eval(exprs["factor_test"], env_test, {})
+
+        return out
+# #### 使用转换器计算因子
 # formula = "CORR(TS_ZSCORE(high, LV(high, 5)), EMV(85), open_interest)"
 # formula = "ADD(WR(1.0), SIN(MUL(LLV(HV(MIN(EMV(22), RANK(BIAS(23), EMV(5.048163479178479))), 11), KDJ_J(4, 63, 11)), SLOPE(RSI(36), 88.67576321773176))))"
 # formula = "RANK(WR(3), FORCAST(EMA(MA(BRAR_BR(39.67400187583232), PSY(61)), SCALE(RANK(BOLL_LOWER(51.92058608481411, 105.33912028012675), CCI(89)), MUL(TS_ZSCORE(TOPRANGE(TS_RANK(TR(), ATR(95))), MAX(CR(18), KDJ_J(10, 74, 79))), RANK(DIFMA(101, 105.70288284157309, 54), DIFMA(67, 119.59247708006433, 110))))), RANK(TS_ZSCORE(SCALE(RANK_SUB(MACD_MACD(103.1367287638528, 49, 71), TS_ZSCORE(ATR(74), DPO(5, 63)), TS_ZSCORE(LLV(CR(73.59636181482315), 60.49431526716149), SIGNEDPOWER(KDJ_D(95.0270735386948, 111.14688602129436, 106.9185473465797)))), SCALE(MAX(ASI(41.10188909712552), TS_ZSCORE(MACD_DIF(90, 11), MFI(27))), RANK_SUB(BBI(100.80402744834933, 17, 12.732093098580961, 29), BIAS(54), KDJ_D(49, 80.24928039078695, 90.62123976587635)))), SCALE(SMA(SIN(SAR(63, 46.70113766183343, 62.152669951821125)), 4, 5.0), SCALE(VR(15), ADX(40.069828069434735, 90.18823201047609)))), INV(RANK(SCALE(RANK(CORR(KDJ_J(89, 57.906667999650715, 41.60920604942375), RSI(22.009126046643384), MACD_DEA(69, 4, 65)), ABS(CR(90.02718123376458))), EMV(65)), CCI(78.69447786554845))))))"
 # formula = "CORR(CORR(SIN(TOPRANGE(PSY(75))), TAN(MASS(188.91227410655506, 50)), ROC(5.943201414914385)), ATR(64.67582157232408), BIAS(15.493019300191346))"
 # 1) 先看转换结果字符串
-exprs = build_factor_expressions(formula, My)
-if isinstance(formula, list):
-    print(f"共 {len(formula)} 个因子")
-    # for i, expr in enumerate(exprs["factor"]):
-        # print(f"因子{i+1}: {expr}") # 已注释
-else:
-    print(exprs["factor"])
-# print(exprs["factor_now"])
-# print(exprs["factor_test"])
+if RUN_AS_SCRIPT:
+    exprs = build_factor_expressions(formula, My)
+    if isinstance(formula, list):
+        print(f"共 {len(formula)} 个因子")
+        # for i, expr in enumerate(exprs["factor"]):
+            # print(f"因子{i+1}: {expr}") # 已注释
+    else:
+        print(exprs["factor"])
+    # print(exprs["factor_now"])
+    # print(exprs["factor_test"])
 
-# 2) 直接计算三套因子
-factors = eval_factors(formula, My, X_dict, X_dict_now, X_dict_test)
-factor = factors["factor"]
-factor_now = factors["factor_now"]
-factor_test = factors["factor_test"]
+    # 2) 直接计算三套因子
+    factors = eval_factors(formula, My, X_dict, X_dict_now, X_dict_test)
+    factor = factors["factor"]
+    factor_now = factors["factor_now"]
+    factor_test = factors["factor_test"]
 
 # ### 手动计算因子
 # CLOSE = X_dict["close"]
@@ -3679,7 +3679,7 @@ factor_test = factors["factor_test"]
 # factor
 # factor = My.MACD_DEA(CLOSE,38.25130077271199, 37.66879219628618, 83)
 AUTO_ON = True
-if not AUTO_ON:
+if RUN_AS_SCRIPT and not AUTO_ON:
     # 因子表达式
     formula = "WR(close, high, low, 2)"
     factor = My.WR(X_dict["close"],X_dict["high"],X_dict["low"],2)
@@ -3882,7 +3882,7 @@ def analyze_single_factor(factor_val, factor_now_val, factor_test_val, y, y_now,
     }
 
 
-if isinstance(formula, list):
+if RUN_AS_SCRIPT and isinstance(formula, list):
     all_results = []
     all_analysis = []
     for i, (f_expr, f_val, f_now_val, f_test_val) in enumerate(zip(formula, factor, factor_now, factor_test)):
@@ -3925,7 +3925,7 @@ if isinstance(formula, list):
         print(f"  训练集 IC: {result['temp_train']['mean_ic']:.6f}, IR: {result['temp_train']['icir']:.6f}")
         print(f"  测试集 IC: {result['temp_test']['mean_ic']:.6f}, IR: {result['temp_test']['icir']:.6f}")
         print(f"  真实集 IC: {result['temp_now']['mean_ic']:.6f}, IR: {result['temp_now']['icir']:.6f}")
-else:
+elif RUN_AS_SCRIPT:
     result = analyze_single_factor(factor, factor_now, factor_test, y, y_now, y_test, formula, pivoted, pivoted_now, pivoted_test)
 
     analysis_train = panel_to_long_factor_df(factor, y, pivoted, 'train')
@@ -3948,8 +3948,8 @@ else:
 
 # ## 因子加入本地库
 
-if SAVE_FACTOR:
-    output_csv = "多因子分析库.csv"
+if RUN_AS_SCRIPT and SAVE_FACTOR:
+    output_csv = "多因子.csv"
 
     if isinstance(formula, list):
         rows_to_save = []
@@ -4062,25 +4062,27 @@ if SAVE_FACTOR:
             print(f"本次因子结果已保存到 {output_csv}")
 
 
-for split_name, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
-    ic_s = ic_curve_from_long(long_df)
-    qret, ls = build_quantile_report(long_df, quantiles=QUANTILES)
+if RUN_AS_SCRIPT:
+    for split_name, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
+        ic_s = ic_curve_from_long(long_df)
+        qret, ls = build_quantile_report(long_df, quantiles=QUANTILES)
 
-    print(f"\n===== {split_name} =====")
-    print(f"样本数: {len(long_df)}")
-    print(f"有效IC时间点: {ic_s.shape[0]}")
-    if not ic_s.empty:
-        print(f"平均IC: {ic_s.mean():.6f}, ICIR: {ic_s.mean() / (ic_s.std() + 1e-8):.6f}")
-    if not qret.empty:
-        print(qret.mean().to_frame('各分位平均未来收益').T)
-        print(ls.describe().to_frame('多空组合统计'))
+        print(f"\n===== {split_name} =====")
+        print(f"样本数: {len(long_df)}")
+        print(f"有效IC时间点: {ic_s.shape[0]}")
+        if not ic_s.empty:
+            print(f"平均IC: {ic_s.mean():.6f}, ICIR: {ic_s.mean() / (ic_s.std() + 1e-8):.6f}")
+        if not qret.empty:
+            print(qret.mean().to_frame('各分位平均未来收益').T)
+            print(ls.describe().to_frame('多空组合统计'))
 
 
 # ## 绘制 Rolling IC 与多空累计收益
 output_dir = "多因子分析可视化"
-os.makedirs(output_dir, exist_ok=True)
+if RUN_AS_SCRIPT:
+    os.makedirs(output_dir, exist_ok=True)
 
-if isinstance(formula, list):
+if RUN_AS_SCRIPT and isinstance(formula, list):
     for analysis in all_analysis:
         factor_idx = analysis['factor_index']
         factor_expr = analysis['formula']
@@ -4095,7 +4097,7 @@ if isinstance(formula, list):
         plt.title(f'因子{factor_idx} Rolling Rank IC\n{factor_expr}')
         plt.legend()
         plt.tight_layout()
-        plt.savefig(f"{output_dir}/因子{factor_idx}_Rolling_IC.png", dpi=150)
+        plt.savefig(f"{output_dir}/因子{factor_idx}滚动IC.png", dpi=150)
         plt.close()
 
         plt.figure(figsize=(12, 4))
@@ -4109,7 +4111,7 @@ if isinstance(formula, list):
         plt.tight_layout()
         plt.savefig(f"{output_dir}/因子{factor_idx}_多空累计收益.png", dpi=150)
         plt.close()
-else:
+elif RUN_AS_SCRIPT:
     plt.figure(figsize=(12, 4))
     for label, long_df in [('训练集', analysis_train), ('测试集', analysis_test), ('真实集', analysis_now)]:
         ic_s = ic_curve_from_long(long_df)
@@ -4119,7 +4121,7 @@ else:
     plt.title('Rolling Rank IC')
     plt.legend()
     plt.tight_layout()
-    plt.savefig(f"{output_dir}/单因子_Rolling_IC.png", dpi=150)
+    plt.savefig(f"{output_dir}/单因子滚动IC.png", dpi=150)
     plt.close()
 
     plt.figure(figsize=(12, 4))
@@ -4139,7 +4141,7 @@ else:
 
 # ==================== LightGBM 多因子合成模型 ====================
 # 仅在多因子列表（公式个数 > 1）时执行
-if isinstance(formula, list) and len(formula) > 1 and USE_LIGHTGBM:
+if RUN_AS_SCRIPT and isinstance(formula, list) and len(formula) > 1 and USE_LIGHTGBM:
     print("\n" + "="*60)
     print("开始 LightGBM 多因子合成模型训练与评估")
     print("="*60)
@@ -4296,7 +4298,7 @@ if isinstance(formula, list) and len(formula) > 1 and USE_LIGHTGBM:
     plt.title('LightGBM 合成因子 Rolling Rank IC')
     plt.legend()
     plt.tight_layout()
-    plt.savefig(f"{output_dir}/LightGBM_Rolling_IC.png", dpi=150)
+    plt.savefig(f"{output_dir}/LightGBM滚动IC.png", dpi=150)
     plt.close()
 
     # 多空累计收益曲线
@@ -4457,7 +4459,7 @@ if isinstance(formula, list) and len(formula) > 1 and USE_LIGHTGBM:
 
 # ==================== Elastic Net 多因子合成模型 ====================
 # 仅在多因子列表（公式个数 > 1）时执行
-if isinstance(formula, list) and len(formula) > 1 and USE_ELASTIC_NET:
+if RUN_AS_SCRIPT and isinstance(formula, list) and len(formula) > 1 and USE_ELASTIC_NET:
     try:
         from sklearn.linear_model import ElasticNet
         from sklearn.metrics import mean_squared_error, mean_absolute_error
@@ -4873,7 +4875,7 @@ def integrate_instashap_to_factor_analysis(
 
 # ==================== InstaSHAP 多因子组合模型 ====================
 # 仅在多因子列表（公式个数 > 1）时执行
-if isinstance(formula, list) and len(formula) > 1 and USE_INSTASHAP:
+if RUN_AS_SCRIPT and isinstance(formula, list) and len(formula) > 1 and USE_INSTASHAP:
     print("\n" + "="*60)
     print("开始 InstaSHAP 多因子组合模型训练与评估")
     print("="*60)

@@ -1,0 +1,38 @@
+2026-04-12 16:53:09,538 [INFO] [Mining][get_futures_data] symbol=ao888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,543 [INFO] 警告：读取 ao888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_ao888_h1' 不存在！
+2026-04-12 16:53:09,545 [INFO] [Mining][get_futures_data] symbol=ni888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,547 [INFO] 警告：读取 ni888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_ni888_h1' 不存在！
+2026-04-12 16:53:09,547 [INFO] [Mining][get_futures_data] symbol=pb888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,549 [INFO] 警告：读取 pb888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_pb888_h1' 不存在！
+2026-04-12 16:53:09,549 [INFO] [Mining][get_futures_data] symbol=sn888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,551 [INFO] 警告：读取 sn888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_sn888_h1' 不存在！
+2026-04-12 16:53:09,552 [INFO] [Mining][get_futures_data] symbol=ss888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,553 [INFO] 警告：读取 ss888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_ss888_h1' 不存在！
+2026-04-12 16:53:09,554 [INFO] [Mining][get_futures_data] symbol=zn888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,555 [INFO] 警告：读取 zn888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_zn888_h1' 不存在！
+2026-04-12 16:53:09,556 [INFO] [Mining][get_futures_data] symbol=al888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,556 [INFO] 警告：读取 al888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_al888_h1' 不存在！
+2026-04-12 16:53:09,557 [INFO] [Mining][get_futures_data] symbol=cu888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,558 [INFO] 警告：读取 cu888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_cu888_h1' 不存在！
+2026-04-12 16:53:09,559 [INFO] [Mining][get_futures_data] symbol=bc888 symbol_cycle='1小时' normalized_cycle='1小时' mapped_cycle='1H' used_default_cycle=False
+2026-04-12 16:53:09,560 [INFO] 警告：读取 bc888 行情失败，已跳过。cycle='1H' start='2025-06-01 00:00:00' end='2025-08-31 23:59:59' err=表 'SYMBOL_bc888_h1' 不存在！
+2026-04-12 16:53:19,846 [INFO] [Mining][get_futures_data] symbol=ao888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,853 [INFO] [Mining][get_futures_data] symbol=ni888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,857 [INFO] [Mining][get_futures_data] symbol=pb888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,862 [INFO] [Mining][get_futures_data] symbol=sn888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,867 [INFO] [Mining][get_futures_data] symbol=ss888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,872 [INFO] [Mining][get_futures_data] symbol=zn888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,877 [INFO] [Mining][get_futures_data] symbol=al888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,880 [INFO] [Mining][get_futures_data] symbol=cu888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,882 [INFO] [Mining][get_futures_data] symbol=bc888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,906 [INFO] [Mining][get_futures_data] symbol=ao888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,911 [INFO] [Mining][get_futures_data] symbol=ni888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,915 [INFO] [Mining][get_futures_data] symbol=pb888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,918 [INFO] [Mining][get_futures_data] symbol=sn888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,922 [INFO] [Mining][get_futures_data] symbol=ss888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,925 [INFO] [Mining][get_futures_data] symbol=zn888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,930 [INFO] [Mining][get_futures_data] symbol=al888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,935 [INFO] [Mining][get_futures_data] symbol=cu888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,940 [INFO] [Mining][get_futures_data] symbol=bc888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-12 16:53:19,956 [INFO] 本次使用的随机数种子为: 2921090795
+2026-04-12 16:53:19,961 [INFO] GeneticProgrammer._evaluate_population函数异常: fitness_func() got an unexpected keyword argument 'FITNESS_W_TRAIN'

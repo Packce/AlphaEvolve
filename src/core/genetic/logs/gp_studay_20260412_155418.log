@@ -1,0 +1,95 @@
+2026-04-12 15:54:20,736 [INFO] 当前使用的合约列表（共 9 个合约）：
+2026-04-12 15:54:20,736 [INFO] ['ao888', 'ni888', 'pb888', 'sn888', 'ss888', 'zn888', 'al888', 'cu888', 'bc888']
+2026-04-12 15:54:20,736 [INFO] 开始获取数据...
+2026-04-12 15:54:20,736 [INFO] 数据获取完成！
+2026-04-12 15:54:21,152 [INFO] [Mining][get_futures_data] caller=<module> symbol=ao888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,193 [INFO] [Mining][get_futures_data] caller=<module> symbol=ao888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,228 [INFO] [Mining][get_futures_data] caller=<module> symbol=ni888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,263 [INFO] [Mining][get_futures_data] caller=<module> symbol=ni888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,296 [INFO] [Mining][get_futures_data] caller=<module> symbol=pb888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,339 [INFO] [Mining][get_futures_data] caller=<module> symbol=pb888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,375 [INFO] [Mining][get_futures_data] caller=<module> symbol=sn888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,419 [INFO] [Mining][get_futures_data] caller=<module> symbol=sn888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,462 [INFO] [Mining][get_futures_data] caller=<module> symbol=ss888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,518 [INFO] [Mining][get_futures_data] caller=<module> symbol=ss888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,565 [INFO] [Mining][get_futures_data] caller=<module> symbol=zn888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,602 [INFO] [Mining][get_futures_data] caller=<module> symbol=zn888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,636 [INFO] [Mining][get_futures_data] caller=<module> symbol=al888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,676 [INFO] [Mining][get_futures_data] caller=<module> symbol=al888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,713 [INFO] [Mining][get_futures_data] caller=<module> symbol=cu888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,762 [INFO] [Mining][get_futures_data] caller=<module> symbol=cu888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,801 [INFO] [Mining][get_futures_data] caller=<module> symbol=bc888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,843 [INFO] [Mining][get_futures_data] caller=<module> symbol=bc888 symbol_cycle='15分钟' mapped_cycle='15min' used_default_cycle=True
+2026-04-12 15:54:21,905 [INFO] 训练集数据预处理完成，共 17865 条记录
+2026-04-12 15:54:21,905 [INFO] 测试集数据预处理完成，共 22419 条记录
+2026-04-12 15:54:21,905 [INFO] 计算训练集目标变量...
+2026-04-12 15:54:21,911 [INFO] 计算测试集目标变量...
+2026-04-12 15:54:21,922 [INFO] 原始数据行数: 17847
+2026-04-12 15:54:21,925 [INFO] 
+构造训练数据...
+2026-04-12 15:54:21,931 [INFO] 特征 open 转换成功，形状: (1983, 9)
+2026-04-12 15:54:21,934 [INFO] 特征 close 转换成功，形状: (1983, 9)
+2026-04-12 15:54:21,937 [INFO] 特征 high 转换成功，形状: (1983, 9)
+2026-04-12 15:54:21,941 [INFO] 特征 low 转换成功，形状: (1983, 9)
+2026-04-12 15:54:21,945 [INFO] 特征 volume 转换成功，形状: (1983, 9)
+2026-04-12 15:54:21,948 [INFO] 特征 open_interest 转换成功，形状: (1983, 9)
+2026-04-12 15:54:21,952 [INFO] 特征 future_return 转换成功，形状: (1983, 9)
+2026-04-12 15:54:21,952 [INFO] 
+构造测试数据...
+2026-04-12 15:54:21,956 [INFO] 特征 open 转换成功，形状: (2489, 9)
+2026-04-12 15:54:21,960 [INFO] 特征 close 转换成功，形状: (2489, 9)
+2026-04-12 15:54:21,963 [INFO] 特征 high 转换成功，形状: (2489, 9)
+2026-04-12 15:54:21,968 [INFO] 特征 low 转换成功，形状: (2489, 9)
+2026-04-12 15:54:21,971 [INFO] 特征 volume 转换成功，形状: (2489, 9)
+2026-04-12 15:54:21,975 [INFO] 特征 open_interest 转换成功，形状: (2489, 9)
+2026-04-12 15:54:21,979 [INFO] 特征 future_return 转换成功，形状: (2489, 9)
+2026-04-12 15:54:21,988 [INFO] 
+训练数据准备完成:
+2026-04-12 15:54:21,989 [INFO] 时间点数量: 1983
+2026-04-12 15:54:21,989 [INFO] 合约数量: 9
+2026-04-12 15:54:21,989 [INFO] 特征数量: 6
+2026-04-12 15:54:21,989 [INFO] 特征列表: ['open', 'close', 'high', 'low', 'volume', 'open_interest']
+2026-04-12 15:54:21,989 [INFO] 
+测试数据准备完成:
+2026-04-12 15:54:21,989 [INFO] 时间点数量: 2489
+2026-04-12 15:54:21,989 [INFO] 合约数量: 9
+2026-04-12 15:54:21,989 [INFO] 特征数量: 6
+2026-04-12 15:54:21,989 [INFO] 特征列表: ['open', 'close', 'high', 'low', 'volume', 'open_interest']
+2026-04-12 15:54:21,989 [INFO] 
+数据质量检查:
+2026-04-12 15:54:21,989 [INFO] y中NaN比例: 0.00%
+2026-04-12 15:54:21,991 [INFO] y中有效值数量: 17847
+2026-04-12 15:54:21,991 [INFO] 训练集最小时间: 2025-06-03 09:00:00, 最大时间: 2025-08-30 00:30:00
+2026-04-12 15:54:21,991 [INFO]   open: NaN比例=0.00%
+2026-04-12 15:54:21,991 [INFO]   close: NaN比例=0.00%
+2026-04-12 15:54:21,991 [INFO]   high: NaN比例=0.00%
+2026-04-12 15:54:21,992 [INFO]   low: NaN比例=0.00%
+2026-04-12 15:54:21,992 [INFO]   volume: NaN比例=0.00%
+2026-04-12 15:54:21,992 [INFO] 
+测试集数据质量检查:
+2026-04-12 15:54:21,992 [INFO] y_test中NaN比例: 0.00%
+2026-04-12 15:54:21,992 [INFO] y_test中有效值数量: 22401
+2026-04-12 15:54:21,992 [INFO] 测试集最小时间: 2025-09-01 09:00:00, 最大时间: 2025-12-30 23:30:00
+2026-04-12 15:54:21,993 [INFO]   open: NaN比例=0.00%
+2026-04-12 15:54:21,993 [INFO]   close: NaN比例=0.00%
+2026-04-12 15:54:21,993 [INFO]   high: NaN比例=0.00%
+2026-04-12 15:54:21,993 [INFO]   low: NaN比例=0.00%
+2026-04-12 15:54:21,993 [INFO]   volume: NaN比例=0.00%
+2026-04-12 15:54:21,994 [INFO] 本次使用的随机数种子为: 342411069
+2026-04-12 15:54:21,994 [INFO] 训练前关键配置检查：
+2026-04-12 15:54:21,994 [INFO]   SYMBOLS数量: 9
+2026-04-12 15:54:21,994 [INFO]   训练集shape: (1983, 9)
+2026-04-12 15:54:21,995 [INFO]   测试集shape: (2489, 9)
+2026-04-12 15:54:21,995 [INFO]   IC_PERIOD: 1
+2026-04-12 15:54:21,995 [INFO]   FITNESS_W_TRAIN: 0.4
+2026-04-12 15:54:21,995 [INFO]   FITNESS_W_TEST: 0.6
+2026-04-12 15:57:17,887 [INFO] 开始遗传规划因子挖掘...
+2026-04-12 15:57:17,887 [INFO] ==============================================================================================================================================================================================================
+2026-04-12 15:57:17,887 [INFO] |       种群信息       |               最优个体               |                 因子质量                 |
+2026-04-12 15:57:17,887 [INFO] 
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+2026-04-12 15:57:17,887 [INFO] 轮次  代数    平均长度    平均适应度    最优长度    最优适应度      平均IC(训/测)       平均IR(训/测)       最优IC(训/测)       最优IR(训/测)   最优有效时点(训/测)   剩余时间  最优表达式
+2026-04-12 15:57:17,887 [INFO] 
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+2026-04-12 15:57:17,888 [INFO]    1    1         5.2       -0.0289           2        0.0384   -0.0079/ 0.0014   -0.0206/ 0.0020    0.0427/ 0.0198    0.1101/ 0.0490          1983/2489         ?  WR(74)
+2026-04-12 16:00:47,412 [INFO]    1    2         4.4       -0.0048           2        0.1154    0.0025/ 0.0093    0.0066/ 0.0208    0.0789/ 0.0603    0.2132/ 0.1525          1983/2489    41.75m  WR(7)
