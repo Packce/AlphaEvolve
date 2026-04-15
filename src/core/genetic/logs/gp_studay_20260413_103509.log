@@ -1,0 +1,21 @@
+2026-04-13 10:35:14,603 [INFO] [Mining][get_futures_data] symbol=ao888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,623 [INFO] [Mining][get_futures_data] symbol=ni888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,629 [INFO] [Mining][get_futures_data] symbol=pb888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,633 [INFO] [Mining][get_futures_data] symbol=sn888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,639 [INFO] [Mining][get_futures_data] symbol=ss888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,643 [INFO] [Mining][get_futures_data] symbol=zn888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,648 [INFO] [Mining][get_futures_data] symbol=al888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,651 [INFO] [Mining][get_futures_data] symbol=cu888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,657 [INFO] [Mining][get_futures_data] symbol=bc888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,691 [INFO] [Mining][get_futures_data] symbol=ao888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,696 [INFO] [Mining][get_futures_data] symbol=ni888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,701 [INFO] [Mining][get_futures_data] symbol=pb888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,706 [INFO] [Mining][get_futures_data] symbol=sn888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,711 [INFO] [Mining][get_futures_data] symbol=ss888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,714 [INFO] [Mining][get_futures_data] symbol=zn888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,718 [INFO] [Mining][get_futures_data] symbol=al888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,723 [INFO] [Mining][get_futures_data] symbol=cu888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,726 [INFO] [Mining][get_futures_data] symbol=bc888 symbol_cycle='1天' normalized_cycle='1天' mapped_cycle='1D' used_default_cycle=False
+2026-04-13 10:35:14,743 [INFO] 本次使用的随机数种子为: 100325934
+2026-04-13 10:35:55,663 [INFO] 进化完成，共发现 1 个候选因子，开始最终评估...
+2026-04-13 10:35:55,699 [INFO] 最终筛选完成，选择了 1 个最优因子

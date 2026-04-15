@@ -9,6 +9,7 @@ import time
 import os
 import json
 import base64
+import hashlib
 from pathlib import Path
 import sys
 from datetime import datetime
@@ -377,7 +378,7 @@ def _save_figure_to_file(fig, output_dir: str, filename: str, dpi: int = 150, bb
 
 def _chart_priority(filename: str) -> tuple[int, str]:
     name = filename.lower()
-    if name.startswith("因子") and "rolling_ic" in name:
+    if name.startswith("因子") and ("rolling_ic" in name or "滚动ic" in name):
         return (0, filename)
     if name.startswith("因子") and "多空累计收益" in filename:
         return (1, filename)
@@ -407,15 +408,10 @@ def _build_chart_item(image_path: str) -> Dict[str, Any]:
 
 def _collect_multi_factor_charts(task_id: str, preferred_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     preferred_paths = preferred_paths or []
-    chart_dirs = [
-        os.path.join(OUTPUT_DIR, task_id, "charts"),
-        "多因子分析可视化",
-        os.path.join("src", "core", "factor", "多因子分析可视化"),
-        os.path.join("src", "api", "多因子分析可视化"),
-    ]
+    chart_dirs = [os.path.join(OUTPUT_DIR, task_id, "charts")]
 
     unique_files: List[str] = []
-    seen_names: set[str] = set()
+    seen_content_hash: set[str] = set()
 
     def _try_add(path_str: str) -> None:
         if not path_str:
@@ -423,10 +419,19 @@ def _collect_multi_factor_charts(task_id: str, preferred_paths: Optional[List[st
         p = Path(path_str)
         if not p.exists() or not p.is_file():
             return
-        key = p.name
-        if key in seen_names:
+
+        file_hash = hashlib.sha1()
+        with open(p, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                file_hash.update(chunk)
+        key = file_hash.hexdigest()
+
+        if key in seen_content_hash:
             return
-        seen_names.add(key)
+        seen_content_hash.add(key)
         unique_files.append(str(p))
 
     for p in preferred_paths:
@@ -478,22 +483,22 @@ def _generate_per_factor_detail_charts(
             analysis_now = mfa.panel_to_long_factor_df(factor_now, y_now, pivoted_now, "now")
 
         fig_ic = plt_module.figure(figsize=(12, 4))
-        for label, long_df in [("训练集", analysis_train), ("测试集", analysis_test), ("真实集", analysis_now)]:
+        for label, long_df in [("训练集", analysis_train), ("测试集", analysis_test), ("验证集", analysis_now)]:
             if long_df is None or long_df.empty:
                 continue
             ic_s = mfa.ic_curve_from_long(long_df)
             if not ic_s.empty:
-                ic_s.rolling(20, min_periods=5).mean().plot(label=f"{label} Rolling IC(20)")
+                ic_s.rolling(20, min_periods=5).mean().plot(label=f"{label} 滚动IC(20)")
         plt_module.axhline(0.0, linestyle="--")
-        plt_module.title(f"因子{i + 1} Rolling Rank IC\n{expr}")
+        plt_module.title(f"因子{i + 1} 滚动IC\n{expr}")
         plt_module.legend()
         plt_module.tight_layout()
-        ic_path = _save_figure_to_file(fig_ic, chart_dir, f"因子{i + 1}_Rolling_IC.png", dpi=150)
+        ic_path = _save_figure_to_file(fig_ic, chart_dir, f"因子{i + 1}_滚动IC.png", dpi=150)
         plt_module.close(fig_ic)
         generated.append(ic_path)
 
         fig_ls = plt_module.figure(figsize=(12, 4))
-        for label, long_df in [("训练集", analysis_train), ("测试集", analysis_test), ("真实集", analysis_now)]:
+        for label, long_df in [("训练集", analysis_train), ("测试集", analysis_test), ("验证集", analysis_now)]:
             if long_df is None or long_df.empty:
                 continue
             _, ls = mfa.build_quantile_report(long_df, quantiles=quantiles)
@@ -506,6 +511,390 @@ def _generate_per_factor_detail_charts(
         ls_path = _save_figure_to_file(fig_ls, chart_dir, f"因子{i + 1}_多空累计收益.png", dpi=150)
         plt_module.close(fig_ls)
         generated.append(ls_path)
+
+    return generated
+
+
+def _cross_sectional_standardize(X: np.ndarray) -> np.ndarray:
+    X_arr = np.asarray(X, dtype=np.float64)
+    X_std = np.full_like(X_arr, np.nan, dtype=np.float64)
+    for t in range(X_arr.shape[0]):
+        for k in range(X_arr.shape[2]):
+            col = X_arr[t, :, k]
+            mask = np.isfinite(col)
+            if int(mask.sum()) < 2:
+                continue
+            mean = float(col[mask].mean())
+            std = float(col[mask].std())
+            if std > 1e-8:
+                X_std[t, mask, k] = (col[mask] - mean) / std
+            else:
+                X_std[t, mask, k] = 0.0
+    return X_std
+
+
+def _fill_nan_with_zero(X: np.ndarray) -> np.ndarray:
+    X_filled = np.asarray(X, dtype=np.float64).copy()
+    X_filled[np.isnan(X_filled)] = 0.0
+    return X_filled
+
+
+def _resolve_time_asset_axes(pivoted_dict: Dict[str, pd.DataFrame]) -> tuple[Optional[pd.Index], Optional[pd.Index]]:
+    if not pivoted_dict:
+        return None, None
+    if "close" in pivoted_dict:
+        base_df = pivoted_dict["close"]
+    else:
+        base_df = next(iter(pivoted_dict.values()))
+    return base_df.index, base_df.columns
+
+
+def _flatten_panel(
+    X: Optional[np.ndarray],
+    y_arr: Optional[np.ndarray],
+    times: Optional[pd.Index],
+    assets: Optional[pd.Index],
+) -> Optional[pd.DataFrame]:
+    if X is None or y_arr is None or times is None or assets is None:
+        return None
+    if X.ndim != 3 or y_arr.ndim != 2:
+        return None
+
+    t_max = min(X.shape[0], y_arr.shape[0], len(times))
+    n_max = min(X.shape[1], y_arr.shape[1], len(assets))
+    if t_max <= 0 or n_max <= 0:
+        return None
+
+    X_crop = X[:t_max, :n_max, :]
+    y_crop = y_arr[:t_max, :n_max]
+    times_crop = times[:t_max]
+    assets_crop = assets[:n_max]
+
+    records: List[Dict[str, Any]] = []
+    k_size = int(X_crop.shape[2])
+    for t in range(t_max):
+        for n in range(n_max):
+            target_val = y_crop[t, n]
+            if not np.isfinite(target_val):
+                continue
+            row: Dict[str, Any] = {
+                "time": times_crop[t],
+                "asset": assets_crop[n],
+                "target": float(target_val),
+            }
+            for k in range(k_size):
+                row[f"factor_{k}"] = float(X_crop[t, n, k])
+            records.append(row)
+
+    if not records:
+        return None
+    return pd.DataFrame(records)
+
+
+def _predictions_to_panel(
+    df_pred: Optional[pd.DataFrame],
+    times: Optional[pd.Index],
+    assets: Optional[pd.Index],
+    target_shape: Optional[tuple[int, int]],
+) -> Optional[np.ndarray]:
+    if df_pred is None or df_pred.empty or times is None or assets is None or target_shape is None:
+        return None
+
+    panel = np.full(target_shape, np.nan, dtype=np.float64)
+    time_to_idx = {t: i for i, t in enumerate(times)}
+    asset_to_idx = {a: j for j, a in enumerate(assets)}
+
+    for _, row in df_pred.iterrows():
+        i = time_to_idx.get(row["time"])
+        j = asset_to_idx.get(row["asset"])
+        if i is None or j is None:
+            continue
+        if i >= panel.shape[0] or j >= panel.shape[1]:
+            continue
+        panel[i, j] = float(row["pred"])
+    return panel
+
+
+def _compute_ic_ls_from_pred_panel(
+    mfa,
+    pred_panel: Optional[np.ndarray],
+    y_arr: Optional[np.ndarray],
+    pivoted_dict: Dict[str, pd.DataFrame],
+    quantiles: int,
+) -> tuple[pd.Series, pd.Series]:
+    empty = pd.Series(dtype=np.float64)
+    if pred_panel is None or y_arr is None or not pivoted_dict:
+        return empty, empty
+    try:
+        long_df = mfa.panel_to_long_factor_df(pred_panel, y_arr, pivoted_dict, "pred")
+    except Exception:
+        return empty, empty
+    if long_df is None or long_df.empty:
+        return empty, empty
+
+    try:
+        ic_s = mfa.ic_curve_from_long(long_df)
+    except Exception:
+        ic_s = empty
+    try:
+        _, ls = mfa.build_quantile_report(long_df, quantiles=quantiles)
+    except Exception:
+        ls = empty
+
+    if ic_s is None:
+        ic_s = empty
+    if ls is None:
+        ls = empty
+    return ic_s, ls
+
+
+def _generate_model_charts(
+    mfa,
+    plt_module,
+    formulas: List[str],
+    factor_arrays_train: List[np.ndarray],
+    factor_arrays_test: List[np.ndarray],
+    factor_arrays_now: List[np.ndarray],
+    y: np.ndarray,
+    y_test: Optional[np.ndarray],
+    y_now: Optional[np.ndarray],
+    pivoted: Dict[str, pd.DataFrame],
+    pivoted_test: Dict[str, pd.DataFrame],
+    pivoted_now: Dict[str, pd.DataFrame],
+    chart_dir: str,
+    quantiles: int,
+    use_lightgbm: bool,
+    use_elastic_net: bool,
+) -> List[str]:
+    generated: List[str] = []
+    if not factor_arrays_train:
+        return generated
+
+    K = len(factor_arrays_train)
+    X_train_raw = np.stack([np.asarray(arr, dtype=np.float64) for arr in factor_arrays_train], axis=2)
+
+    X_test_raw: Optional[np.ndarray] = None
+    if factor_arrays_test and len(factor_arrays_test) >= K:
+        X_test_raw = np.stack([np.asarray(arr, dtype=np.float64) for arr in factor_arrays_test[:K]], axis=2)
+
+    X_now_raw: Optional[np.ndarray] = None
+    if factor_arrays_now and len(factor_arrays_now) >= K:
+        X_now_raw = np.stack([np.asarray(arr, dtype=np.float64) for arr in factor_arrays_now[:K]], axis=2)
+
+    X_train = _fill_nan_with_zero(_cross_sectional_standardize(X_train_raw))
+    X_test = _fill_nan_with_zero(_cross_sectional_standardize(X_test_raw)) if X_test_raw is not None else None
+    X_now = _fill_nan_with_zero(_cross_sectional_standardize(X_now_raw)) if X_now_raw is not None else None
+
+    times_train, assets_train = _resolve_time_asset_axes(pivoted)
+    times_test, assets_test = _resolve_time_asset_axes(pivoted_test)
+    times_now, assets_now = _resolve_time_asset_axes(pivoted_now)
+
+    df_train = _flatten_panel(X_train, y, times_train, assets_train)
+    df_test = _flatten_panel(X_test, y_test, times_test, assets_test)
+    df_now = _flatten_panel(X_now, y_now, times_now, assets_now)
+    if df_train is None or df_train.empty:
+        return generated
+
+    feature_cols = [f"factor_{k}" for k in range(K)]
+    split_colors = {"训练集": "#1f77b4", "测试集": "#ff7f0e", "验证集": "#2ca02c"}
+
+    def _append_prediction_charts(prefix: str, df_train_pred: pd.DataFrame, df_test_pred: Optional[pd.DataFrame], df_now_pred: Optional[pd.DataFrame]) -> None:
+        nonlocal generated
+        pred_panel_train = _predictions_to_panel(df_train_pred, times_train, assets_train, y.shape if y is not None else None)
+        pred_panel_test = _predictions_to_panel(df_test_pred, times_test, assets_test, y_test.shape if y_test is not None else None)
+        pred_panel_now = _predictions_to_panel(df_now_pred, times_now, assets_now, y_now.shape if y_now is not None else None)
+
+        split_stats = [
+            ("训练集", *_compute_ic_ls_from_pred_panel(mfa, pred_panel_train, y, pivoted, quantiles)),
+            ("测试集", *_compute_ic_ls_from_pred_panel(mfa, pred_panel_test, y_test, pivoted_test, quantiles)),
+            ("验证集", *_compute_ic_ls_from_pred_panel(mfa, pred_panel_now, y_now, pivoted_now, quantiles)),
+        ]
+
+        fig_ic = plt_module.figure(figsize=(12, 4))
+        plotted_ic = 0
+        for label, ic_s, _ in split_stats:
+            if ic_s is None or ic_s.empty:
+                continue
+            ic_s.rolling(20, min_periods=5).mean().plot(label=f"{label} 滚动IC(20)", color=split_colors.get(label))
+            plotted_ic += 1
+        plt_module.axhline(0.0, linestyle="--", color="black", alpha=0.6)
+        plt_module.title(f"{prefix} 合成因子 滚动IC")
+        if plotted_ic > 0:
+            plt_module.legend()
+        plt_module.tight_layout()
+        rolling_name = f"{prefix}_滚动IC.png"
+        rolling_path = _save_figure_to_file(fig_ic, chart_dir, rolling_name, dpi=150, bbox_inches="tight")
+        plt_module.close(fig_ic)
+        generated.append(rolling_path)
+
+        fig_ls = plt_module.figure(figsize=(12, 4))
+        plotted_ls = 0
+        for label, _, ls in split_stats:
+            if ls is None or ls.empty:
+                continue
+            ls.fillna(0).cumsum().plot(label=f"{label} 多空累计收益", color=split_colors.get(label))
+            plotted_ls += 1
+        plt_module.axhline(0.0, linestyle="--", color="black", alpha=0.6)
+        plt_module.title(f"{prefix} 合成因子 Top-Bottom 多空累计收益")
+        if plotted_ls > 0:
+            plt_module.legend()
+        plt_module.tight_layout()
+        ls_name = f"{prefix}_多空累计收益.png"
+        ls_path = _save_figure_to_file(fig_ls, chart_dir, ls_name, dpi=150, bbox_inches="tight")
+        plt_module.close(fig_ls)
+        generated.append(ls_path)
+
+        if df_now_pred is not None and not df_now_pred.empty:
+            fig_scatter = plt_module.figure(figsize=(6, 6))
+            sample = df_now_pred
+            if len(sample) > 5000:
+                sample = sample.sample(n=5000, random_state=42)
+            plt_module.scatter(sample["pred"], sample["target"], alpha=0.3, s=4)
+            plt_module.xlabel("预测值")
+            plt_module.ylabel("真实未来收益")
+            plt_module.title("验证集：预测 vs 真实")
+            plt_module.grid(True, alpha=0.3)
+            plt_module.tight_layout()
+            scatter_name = f"{prefix}_预测vs真实.png"
+            scatter_path = _save_figure_to_file(fig_scatter, chart_dir, scatter_name, dpi=150, bbox_inches="tight")
+            plt_module.close(fig_scatter)
+            generated.append(scatter_path)
+
+    if use_lightgbm:
+        try:
+            import lightgbm as lgb
+
+            lgb_params = {
+                "n_estimators": 200,
+                "learning_rate": 0.05,
+                "max_depth": 6,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "reg_alpha": 0.1,
+                "reg_lambda": 0.1,
+                "min_child_samples": 20,
+                "random_state": 42,
+                "verbosity": -1,
+            }
+            lgb_model = lgb.LGBMRegressor(**lgb_params)
+            lgb_model.fit(df_train[feature_cols], df_train["target"])
+
+            df_train_lgb = df_train.copy()
+            df_train_lgb["pred"] = lgb_model.predict(df_train_lgb[feature_cols])
+            df_test_lgb = None
+            if df_test is not None and not df_test.empty:
+                df_test_lgb = df_test.copy()
+                df_test_lgb["pred"] = lgb_model.predict(df_test_lgb[feature_cols])
+            df_now_lgb = None
+            if df_now is not None and not df_now.empty:
+                df_now_lgb = df_now.copy()
+                df_now_lgb["pred"] = lgb_model.predict(df_now_lgb[feature_cols])
+
+            _append_prediction_charts("LightGBM", df_train_lgb, df_test_lgb, df_now_lgb)
+
+            fig_imp = plt_module.figure(figsize=(10, 6))
+            importances = np.asarray(lgb_model.feature_importances_, dtype=np.float64)
+            order = np.argsort(importances)[::-1]
+            labels = [formulas[i] if i < len(formulas) else f"因子{i + 1}" for i in order]
+            vals = importances[order]
+            plt_module.barh(range(len(labels)), vals[::-1], color="#3b82f6")
+            plt_module.yticks(range(len(labels)), labels[::-1])
+            plt_module.xlabel("特征重要性")
+            plt_module.title("LightGBM 特征重要性")
+            plt_module.tight_layout()
+            imp_path = _save_figure_to_file(fig_imp, chart_dir, "LightGBM_特征重要性.png", dpi=150)
+            plt_module.close(fig_imp)
+            generated.append(imp_path)
+
+            # 残差分析图（优先使用验证集，无验证集时回退测试集/训练集）
+            residual_df = None
+            residual_label = ""
+            if df_now_lgb is not None and not df_now_lgb.empty:
+                residual_df = df_now_lgb
+                residual_label = "验证集"
+            elif df_test_lgb is not None and not df_test_lgb.empty:
+                residual_df = df_test_lgb
+                residual_label = "测试集"
+            elif df_train_lgb is not None and not df_train_lgb.empty:
+                residual_df = df_train_lgb
+                residual_label = "训练集"
+
+            if residual_df is not None:
+                residuals = (residual_df["target"] - residual_df["pred"]).replace([np.inf, -np.inf], np.nan).dropna()
+                if not residuals.empty:
+                    fig_res, axes_res = plt_module.subplots(1, 2, figsize=(12, 4))
+
+                    # 左图：残差分布
+                    axes_res[0].hist(residuals.values, bins=50, color="#60a5fa", edgecolor="black", alpha=0.75)
+                    axes_res[0].axvline(0.0, color="red", linestyle="--", alpha=0.7)
+                    axes_res[0].set_title(f"残差分布（{residual_label}）")
+                    axes_res[0].set_xlabel("残差")
+                    axes_res[0].set_ylabel("频数")
+
+                    # 右图：残差 vs 预测值
+                    scatter_df = residual_df[["pred", "target"]].replace([np.inf, -np.inf], np.nan).dropna()
+                    if len(scatter_df) > 5000:
+                        scatter_df = scatter_df.sample(n=5000, random_state=42)
+                    res_vals = scatter_df["target"] - scatter_df["pred"]
+                    axes_res[1].scatter(scatter_df["pred"], res_vals, s=6, alpha=0.35, color="#1d4ed8")
+                    axes_res[1].axhline(0.0, color="red", linestyle="--", alpha=0.7)
+                    axes_res[1].set_title(f"残差 vs 预测值（{residual_label}）")
+                    axes_res[1].set_xlabel("预测值")
+                    axes_res[1].set_ylabel("残差")
+
+                    fig_res.suptitle("LightGBM 残差分析", fontsize=12, fontweight="bold")
+                    fig_res.tight_layout(rect=[0, 0, 1, 0.95])
+                    residual_path = _save_figure_to_file(fig_res, chart_dir, "LightGBM_残差分析.png", dpi=150)
+                    plt_module.close(fig_res)
+                    generated.append(residual_path)
+        except Exception as exc:
+            print(f"[Multi][Charts] LightGBM 图表生成失败: {exc}")
+
+    if use_elastic_net:
+        try:
+            from sklearn.linear_model import ElasticNet
+
+            enet_params = {
+                "alpha": 0.05,
+                "l1_ratio": 0.5,
+                "fit_intercept": True,
+                "max_iter": 5000,
+                "random_state": 42,
+                "selection": "cyclic",
+            }
+            enet_model = ElasticNet(**enet_params)
+            enet_model.fit(df_train[feature_cols], df_train["target"])
+
+            df_train_enet = df_train.copy()
+            df_train_enet["pred"] = enet_model.predict(df_train_enet[feature_cols])
+            df_test_enet = None
+            if df_test is not None and not df_test.empty:
+                df_test_enet = df_test.copy()
+                df_test_enet["pred"] = enet_model.predict(df_test_enet[feature_cols])
+            df_now_enet = None
+            if df_now is not None and not df_now.empty:
+                df_now_enet = df_now.copy()
+                df_now_enet["pred"] = enet_model.predict(df_now_enet[feature_cols])
+
+            _append_prediction_charts("ElasticNet", df_train_enet, df_test_enet, df_now_enet)
+
+            fig_coef = plt_module.figure(figsize=(10, 6))
+            coef = np.asarray(enet_model.coef_, dtype=np.float64)
+            coef_labels = [formulas[i] if i < len(formulas) else f"因子{i + 1}" for i in range(len(coef))]
+            coef_series = pd.Series(coef, index=coef_labels)
+            coef_series = coef_series.reindex(coef_series.abs().sort_values(ascending=False).index)
+            colors = ["#16a34a" if v >= 0 else "#dc2626" for v in coef_series.values]
+            plt_module.barh(range(len(coef_series)), coef_series.values, color=colors, alpha=0.8)
+            plt_module.yticks(range(len(coef_series)), coef_series.index)
+            plt_module.axvline(0.0, color="black", linestyle="--", alpha=0.6)
+            plt_module.xlabel("系数值")
+            plt_module.title("Elastic Net 系数条形图")
+            plt_module.tight_layout()
+            coef_path = _save_figure_to_file(fig_coef, chart_dir, "ElasticNet_系数条形图.png", dpi=150)
+            plt_module.close(fig_coef)
+            generated.append(coef_path)
+        except Exception as exc:
+            print(f"[Multi][Charts] ElasticNet 图表生成失败: {exc}")
 
     return generated
 
@@ -617,8 +1006,9 @@ def run_single_factor_task(task_id: str, params: SingleFactorParams):
 
                 df_list_now = []
                 if params.begin_time_now:
+                    validation_end_time = getattr(sfa, "END_TIME_NOW", datetime.now().strftime("%Y-%m-%d"))
                     for symbol in SYMBOLS:
-                        data = sfa_get_data(symbol, params.begin_time_now, None, params.symbol_cycle)
+                        data = sfa_get_data(symbol, params.begin_time_now, validation_end_time, params.symbol_cycle)
                         if len(data) > 0:
                             df_list_now.append(data)
                 
@@ -977,10 +1367,21 @@ def run_single_factor_task(task_id: str, params: SingleFactorParams):
 
 def run_multi_factor_task(task_id: str, params: MultiFactorParams):
     try:
+        start_time = time.time()
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         _configure_plot_style(plt)
+
+        def _update_multi_task(message: str, progress: Optional[float] = None, status: Optional[str] = None, **kwargs) -> None:
+            payload: Dict[str, Any] = dict(kwargs)
+            payload["message"] = message
+            if progress is not None:
+                payload["progress"] = progress
+            if status is not None:
+                payload["status"] = status
+            payload["elapsed_time"] = time.time() - start_time
+            update_task(task_id, **payload)
 
         use_mock = not MULTI_FACTOR_AVAILABLE
 
@@ -1013,6 +1414,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
             mfa.BEGIN_TIME_TEST = params.begin_time_test
             mfa.END_TIME_TEST = params.end_time_test
             mfa.BEGIN_TIME_NOW = params.begin_time_now
+            mfa.END_TIME_NOW = getattr(mfa, "END_TIME_NOW", datetime.now().strftime("%Y-%m-%d"))
             mfa.SYMBOL_CYCLE = params.symbol_cycle
             mfa.Y_PERIOD = params.y_period
             mfa.USE_LIGHTGBM = params.use_lightgbm
@@ -1050,8 +1452,9 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
 
             df_list_now = []
             if params.begin_time_now:
+                validation_end_time = mfa.END_TIME_NOW
                 for symbol in SYMBOLS:
-                    data = mfa.get_futures_data(symbol, mfa.BEGIN_TIME_NOW, None, mfa.SYMBOL_CYCLE)
+                    data = mfa.get_futures_data(symbol, mfa.BEGIN_TIME_NOW, validation_end_time, mfa.SYMBOL_CYCLE)
                     if len(data) > 0:
                         df_list_now.append(data)
             
@@ -1061,8 +1464,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
             features = ['open', 'close', 'high', 'low', 'volume', 'open_interest']
             formulas = mfa.formula
         
-        start_time = time.time()
-        update_task(task_id, status="running", message="正在初始化...")
+        _update_multi_task(message="正在初始化...", status="running")
         
         old_stdout = sys.stdout
         capture = OutputCapture(mirror=old_stdout)
@@ -1104,7 +1506,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
         y = pivoted[target].values
         print(f"训练数据准备完成: 时间点={y.shape[0]}, 合约数={y.shape[1]}")
 
-        update_task(task_id, message="正在加载测试数据...", progress=20)
+        _update_multi_task(message="正在加载测试数据...", progress=20)
 
         if df_test.empty:
             raise ValueError("测试集没有有效数据")
@@ -1135,7 +1537,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
         y_test = pivoted_test[target].values
         print(f"测试数据准备完成: 时间点={y_test.shape[0]}, 合约数={y_test.shape[1]}")
 
-        update_task(task_id, message="正在加载验证集数据...", progress=30)
+        _update_multi_task(message="正在加载验证集数据...", progress=30)
 
         X_dict_now = None
         y_now = None
@@ -1164,7 +1566,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
             X_dict_now = {f: pivoted_now[f].values for f in features}
             y_now = pivoted_now[target].values
         
-        update_task(task_id, message="正在评估因子...", progress=40)
+        _update_multi_task(message="正在评估因子...", progress=40)
         
         print(f"\n因子表达式列表: {formula_list}")
         print(f"品种合约: {SYMBOLS}")
@@ -1193,7 +1595,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
         
         print(f"\n所有因子评估完成，共 {len(factor_arrays)} 个因子")
         
-        update_task(task_id, message="正在进行分层分析...", progress=50)
+        _update_multi_task(message="正在进行分层分析...", progress=50)
         
         ic_stats_list = []
         train_ic_means, test_ic_means, now_ic_means = [], [], []
@@ -1245,7 +1647,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
         print("\n因子IC汇总:")
         print(summary_df)
         
-        update_task(task_id, message="正在生成图表...", progress=70)
+        _update_multi_task(message="正在生成图表...", progress=70)
         
         charts = []
         names = [f"因子{i+1}" for i in range(len(formula_list))]
@@ -1353,7 +1755,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
         })
         plt.close(fig)
 
-        update_task(task_id, message="正在生成单因子拆分图...", progress=82)
+        _update_multi_task(message="正在生成单因子拆分图...", progress=82)
         task_chart_dir = os.path.join(OUTPUT_DIR, task_id, "charts")
         detail_paths = _generate_per_factor_detail_charts(
             mfa=mfa,
@@ -1372,13 +1774,33 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
             quantiles=params.quantiles,
         )
 
-        update_task(task_id, message="正在整理全量图表...", progress=90)
+        _update_multi_task(message="正在生成机器学习模型图...", progress=86)
+        model_paths = _generate_model_charts(
+            mfa=mfa,
+            plt_module=plt,
+            formulas=formula_list,
+            factor_arrays_train=factor_arrays,
+            factor_arrays_test=factor_arrays_test,
+            factor_arrays_now=factor_arrays_now,
+            y=y,
+            y_test=y_test,
+            y_now=y_now,
+            pivoted=pivoted,
+            pivoted_test=pivoted_test,
+            pivoted_now=pivoted_now,
+            chart_dir=task_chart_dir,
+            quantiles=params.quantiles,
+            use_lightgbm=params.use_lightgbm,
+            use_elastic_net=params.use_elastic_net,
+        )
+
+        _update_multi_task(message="正在整理全量图表...", progress=90)
         charts = _collect_multi_factor_charts(
             task_id=task_id,
-            preferred_paths=[chart_path, *detail_paths],
+            preferred_paths=[chart_path, *detail_paths, *model_paths],
         )
         
-        update_task(task_id, message="分析完成", progress=100)
+        _update_multi_task(message="分析完成", progress=100)
         
         elapsed_time = time.time() - start_time
         
@@ -1398,6 +1820,7 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
                 "output_text": output_text,
                 "elapsed_time": elapsed_time,
             },
+            elapsed_time=elapsed_time,
             completed_at=datetime.now().isoformat()
         )
         
@@ -1406,11 +1829,13 @@ def run_multi_factor_task(task_id: str, params: MultiFactorParams):
         sys.stdout = old_stdout
         output_text = capture.get_output() + f"\n错误: {str(e)}\n{traceback.format_exc()}" if 'capture' in locals() else f"错误: {str(e)}\n{traceback.format_exc()}"
         
+        elapsed_time_on_error = (time.time() - start_time) if 'start_time' in locals() else None
         update_task(
             task_id,
             status="failed",
             message=f"任务失败: {str(e)}",
             result={"output_text": output_text, "error": str(e)},
+            elapsed_time=elapsed_time_on_error,
             completed_at=datetime.now().isoformat()
         )
 
@@ -2224,4 +2649,5 @@ async def get_mining_default_config():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 

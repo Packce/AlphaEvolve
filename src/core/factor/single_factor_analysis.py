@@ -366,11 +366,11 @@ def get_futures_data(symbol, start_time=None, end_time=None, symbol_cycle=None):
         used_default_cycle = True
 
     mapped_cycle = SYMBOL_CYCLE_MAP[cycle_name]
-    print(
-        f"[Single][get_futures_data] symbol={symbol} "
-        f"symbol_cycle={raw_symbol_cycle!r} normalized_cycle={cycle_name!r} "
-        f"mapped_cycle={mapped_cycle!r} used_default_cycle={used_default_cycle}"
-    )
+    # print(
+    #     f"[Single][get_futures_data] symbol={symbol} "
+    #     f"symbol_cycle={raw_symbol_cycle!r} normalized_cycle={cycle_name!r} "
+    #     f"mapped_cycle={mapped_cycle!r} used_default_cycle={used_default_cycle}"
+    # )
     # data = load_kline(product=symbol, cycle="1D", start_time=start_time, end_time=end_time)
     # data = load_kline(product=symbol, cycle="15min", start_time=start_time, end_time=end_time)
     try:

@@ -32,8 +32,8 @@ pip install fastapi uvicorn pandas numpy matplotlib pydantic
 ### 2. 启动服务
 
 ```bash
-cd /d D:\PythonCode\computer_design
-D:/软件/期魔方/coder/python3116/python.exe d:/PythonCode/computer_design/src/api/unified_api.py
+cd D:\PythonCode\AlphaEvovle\back_end
+D:\软件\期魔方\coder\python3116\python.exe d:\PythonCode\AlphaEvovle\back_end\src\api\unified_api.py
 ``` 
 
 服务默认运行在 `http://0.0.0.0:8000`

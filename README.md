@@ -57,7 +57,8 @@ pip install -r requirements_api.txt
 ### 启动API服务
 
 ```bash
-python src/api/unified_api.py
+cd D:\PythonCode\AlphaEvovle\back_end
+D:\软件\期魔方\coder\python3116\python.exe d:\PythonCode\AlphaEvovle\back_end\src\api\unified_api.py
 ```
 
 服务启动后访问 `http://localhost:8000/docs` 查看API文档。
